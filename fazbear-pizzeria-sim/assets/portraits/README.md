@@ -1,14 +1,8 @@
 # Portrait sources
 
-These art files were gathered from the user's installed games or supplied by the user for this local mashup prototype:
+These assets are user-supplied images or portraits from the user's installed games, used locally for this mashup prototype:
 
-- `freddy.png`, `springtrap.png`, and `nightmare-chica.png`: Ultimate Custom Night custom-night character portraits.
-- `toy-bonnie.png`: Toy Bonnie portrait supplied by the user.\n- `foxy.png`: Foxy portrait supplied by the user.
-- `scrap-baby.png`: replacement portrait supplied by the user.
-- `foxy.png`: Foxy portrait supplied by the user.
+- `bonnie.png`, `chica.png`, `foxy.png`, `golden-freddy.png`, `scrap-baby.png`, and `toy-bonnie.png`: supplied by the user.
+- `freddy.png`, `springtrap.png`, and `nightmare-chica.png`: Ultimate Custom Night custom-night portraits.
 
 The portrait images remain copyrighted game assets and should not be redistributed as a standalone asset pack.
-
-- `bonnie.png`: Bonnie in-game portrait supplied by the user.
-- `chica.png`: Chica's UCN mugshot supplied by the user from [her UCN wiki page](https://the-fnaf-ultimate-custom-night.fandom.com/wiki/Chica).
-

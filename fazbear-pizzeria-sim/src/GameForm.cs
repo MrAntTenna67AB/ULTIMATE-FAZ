@@ -68,6 +68,8 @@ internal sealed class GameForm : Form
     private bool _ventScanned;
     private bool _monitorOpen;
     private bool _cameraMonitorMode;
+    private bool _goldenFreddyReady;
+    private bool _goldenFreddyEncounterTriggered;
     private string _selectedCamera = "1A";
     private bool _leftLightOn;
     private bool _rightLightOn;
@@ -180,6 +182,7 @@ internal sealed class GameForm : Form
     {
         ["freddy"] = ["1A", "1B", "7", "6", "4A", "4B"],
         ["foxy"] = ["1C", "2A", "2B"],
+        ["golden-freddy"] = ["2B"],
         ["bonnie"] = ["1A", "1B", "2A", "2B"],
         ["chica"] = ["1A", "1B", "7", "4A", "4B"],
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
@@ -1096,7 +1099,7 @@ internal sealed class GameForm : Form
     {
         DrawText(g, "ANIMATRONIC FILES", _titleFont, _ink, 48, 141, 530, 34);
         DrawText(g, "Unlock a game's character file once, then buy its animatronics. Hover portraits for details; wheel over owned portraits to change AI.", _bodyFont, _muted, 50, 178, 1172, 24);
-        _rosterViewportRect = new RectangleF(48, 282, 1174, 317);
+        _rosterViewportRect = new RectangleF(48, 319, 1174, 280);
         _rosterGroupHeaderRects.Clear();
         _animatronicCategoryUnlockRects.Clear();
         _rosterCardRects.Clear();
@@ -1197,30 +1200,30 @@ internal sealed class GameForm : Form
 
     private void DrawRosterTooltip(Graphics g)
     {
-        var panel = new RectangleF(48, 209, 1174, 62);
+        var panel = new RectangleF(48, 209, 1174, 101);
         DrawPanel(g, panel, Color.FromArgb(15, 20, 20));
         if (_rosterHoveredAnimatronic is null)
         {
             _rosterAiMinusRect = RectangleF.Empty; _rosterAiPlusRect = RectangleF.Empty;
-            DrawText(g, "HOVER A PORTRAIT FOR ITS RULES AND PIZZERIA RATINGS", _smallFont, _muted, panel.X + 14, panel.Y + 22, panel.Width - 28, 20);
+            DrawText(g, "HOVER A PORTRAIT FOR ITS RULES AND PIZZERIA RATINGS", _smallFont, _muted, panel.X + 14, panel.Y + 38, panel.Width - 28, 20);
             return;
         }
         var a = _sheets.Animatronics.First(entry => entry.Id == _rosterHoveredAnimatronic);
         DrawText(g, a.Name, _panelTitleFont, _ink, panel.X + 14, panel.Y + 5, 330, 22);
         DrawText(g, $"ATM {a.Atmosphere} · H&S {a.HealthSafety} · ENT {a.Entertainment} · REV {a.BonusRevenue}", _smallFont, _teal, panel.X + 352, panel.Y + 8, panel.Width - 366, 18, StringAlignment.Far);
-        DrawText(g, a.Rule, _smallFont, _muted, panel.X + 14, panel.Y + 34, 690, 20);
+        DrawText(g, a.Rule, _smallFont, _muted, panel.X + 14, panel.Y + 34, panel.Width - 28, 38);
         if (!_owned.Contains(a.Id))
         {
             _rosterAiMinusRect = RectangleF.Empty; _rosterAiPlusRect = RectangleF.Empty;
-            DrawText(g, $"PRICE ${a.Cost:N0} · CLICK TO BUY", _smallFont, _gold, panel.X + 746, panel.Y + 34, 410, 18, StringAlignment.Far);
+            DrawText(g, $"PRICE ${a.Cost:N0} · CLICK TO BUY", _smallFont, _gold, panel.X + 746, panel.Y + 76, 410, 18, StringAlignment.Far);
             return;
         }
-        DrawText(g, _stageAnimatronics.Contains(a.Id) ? "ON STAGE" : "OFF STAGE", _smallFont, _stageAnimatronics.Contains(a.Id) ? _gold : _muted, panel.X + 746, panel.Y + 34, 90, 18, StringAlignment.Far);
-        DrawText(g, "AI", _smallFont, _muted, panel.X + 850, panel.Y + 34, 22, 18);
-        _rosterAiMinusRect = new RectangleF(panel.X + 878, panel.Y + 31, 24, 24);
-        _rosterAiPlusRect = new RectangleF(panel.X + 974, panel.Y + 31, 24, 24);
+        DrawText(g, _stageAnimatronics.Contains(a.Id) ? "ON STAGE" : "OFF STAGE", _smallFont, _stageAnimatronics.Contains(a.Id) ? _gold : _muted, panel.X + 746, panel.Y + 76, 90, 18, StringAlignment.Far);
+        DrawText(g, "AI", _smallFont, _muted, panel.X + 850, panel.Y + 76, 22, 18);
+        _rosterAiMinusRect = new RectangleF(panel.X + 878, panel.Y + 72, 24, 24);
+        _rosterAiPlusRect = new RectangleF(panel.X + 974, panel.Y + 72, 24, 24);
         DrawAiStepButton(g, _rosterAiMinusRect, "−", _ai[a.Id] > 0);
-        DrawText(g, _ai[a.Id].ToString("00"), _smallFont, _gold, panel.X + 910, panel.Y + 35, 56, 17, StringAlignment.Center);
+        DrawText(g, _ai[a.Id].ToString("00"), _smallFont, _gold, panel.X + 910, panel.Y + 76, 56, 17, StringAlignment.Center);
         DrawAiStepButton(g, _rosterAiPlusRect, "+", _ai[a.Id] < _sheets.MaximumAiLevel);
     }
 
@@ -1479,60 +1482,65 @@ internal sealed class GameForm : Form
 
     private void DrawCameraMonitor(Graphics g, RectangleF panel)
     {
-        var feed = new RectangleF(panel.X + 18, panel.Y + 62, 474, panel.Height - 80);
+        var feed = new RectangleF(panel.X + 18, panel.Y + 62, panel.Width - 36, panel.Height * .56f);
         using (var fill = new SolidBrush(Color.FromArgb(18, 25, 24))) g.FillRectangle(fill, feed);
         using (var border = new Pen(_edge)) g.DrawRectangle(border, feed.X, feed.Y, feed.Width, feed.Height);
         var camera = FnafCameras.FirstOrDefault(c => c.Id == _selectedCamera);
         DrawText(g, $"CAM {camera.Id}  /  {camera.Name}", _smallFont, _gold, feed.X + 14, feed.Y + 12, feed.Width - 28, 18);
-        using (var room = new LinearGradientBrush(new RectangleF(feed.X + 12, feed.Y + 42, feed.Width - 24, 234), Color.FromArgb(31, 41, 39), Color.FromArgb(8, 12, 12), 90f))
-            g.FillRectangle(room, feed.X + 12, feed.Y + 42, feed.Width - 24, 234);
-        DrawLine(g, Color.FromArgb(85, 110, 103), 1, feed.X + 24, feed.Y + 204, feed.Right - 24, feed.Y + 204);
-        DrawLine(g, Color.FromArgb(85, 110, 103), 1, feed.X + 34, feed.Y + 258, feed.Right - 34, feed.Y + 258);
+        var room = new RectangleF(feed.X + 12, feed.Y + 40, feed.Width - 24, feed.Height - 52);
+        using (var roomFill = new LinearGradientBrush(room, Color.FromArgb(31, 41, 39), Color.FromArgb(8, 12, 12), 90f)) g.FillRectangle(roomFill, room);
+        DrawLine(g, Color.FromArgb(85, 110, 103), 1, room.X + 12, room.Y + room.Height * .67f, room.Right - 12, room.Y + room.Height * .67f);
+        DrawLine(g, Color.FromArgb(85, 110, 103), 1, room.X + 24, room.Bottom - 18, room.Right - 24, room.Bottom - 18);
         var occupants = _animatronicCameras.Where(x => x.Value == camera.Id)
             .Select(x => _sheets.Animatronics.FirstOrDefault(a => a.Id == x.Key)).Where(a => a is not null).ToArray();
-        if (occupants.Length == 0) DrawText(g, "NO MOVEMENT", _bodyFont, _muted, feed.X + 28, feed.Y + 140, feed.Width - 56, 25, StringAlignment.Center);
+        var goldenPoster = camera.Id == "2B" && _goldenFreddyReady && _portraitArt.ContainsKey("golden-freddy");
+        if (goldenPoster && _portraitArt.TryGetValue("golden-freddy", out var goldenPortraitImage))
+        {
+            var poster = new RectangleF(room.X + room.Width / 2 - 78, room.Y + 8, 156, room.Height - 25);
+            g.DrawImage(goldenPortraitImage, poster);
+            DrawText(g, "POSTER CHANGED · LOWER MONITOR", _smallFont, _gold, room.X + 8, room.Bottom - 20, room.Width - 16, 18, StringAlignment.Center);
+        }
+        else if (occupants.Length == 0) DrawText(g, "NO MOVEMENT", _bodyFont, _muted, room.X + 28, room.Y + 84, room.Width - 56, 28, StringAlignment.Center);
         else
         {
-            var portraitWidth = Math.Min(112, (feed.Width - 40f) / occupants.Length);
-            for (var i = 0; i < occupants.Length; i++)
+            var visibleCount = Math.Min(4, occupants.Length);
+            var portraitWidth = Math.Min(178, (room.Width - 42f) / visibleCount - 12);
+            var portraitHeight = Math.Min(190, room.Height - 47);
+            var groupWidth = visibleCount * portraitWidth + (visibleCount - 1) * 16;
+            var startX = room.X + (room.Width - groupWidth) / 2;
+            for (var i = 0; i < visibleCount; i++)
             {
-                var portrait = new RectangleF(feed.X + 20 + i * (portraitWidth + 12), feed.Y + 66, portraitWidth, 132);
+                var portrait = new RectangleF(startX + i * (portraitWidth + 16), room.Y + 8, portraitWidth, portraitHeight);
                 DrawPortraitFrame(g, occupants[i]!, portrait);
-                DrawText(g, occupants[i]!.Name.ToUpperInvariant(), _smallFont, _ink, portrait.X - 2, portrait.Bottom + 8, portrait.Width + 4, 28, StringAlignment.Center);
+                DrawText(g, occupants[i]!.Name.ToUpperInvariant(), _smallFont, _ink, portrait.X - 2, portrait.Bottom + 4, portrait.Width + 4, 18, StringAlignment.Center);
             }
+            if (occupants.Length > visibleCount) DrawText(g, $"+{occupants.Length - visibleCount} MORE ON THIS CAMERA", _smallFont, _gold, room.X, room.Bottom - 20, room.Width, 18, StringAlignment.Center);
         }
-        DrawText(g, "CAMERA MAP", _smallFont, _teal, feed.X + 12, feed.Bottom - 28, feed.Width - 24, 18);
-        DrawText(g, "AI-weighted movement checks: 3s Freddy / 5s others.", _smallFont, _muted, feed.X + 12, feed.Bottom - 14, feed.Width - 24, 16);
-
-        var map = new RectangleF(feed.Right + 12, feed.Y, panel.Right - feed.Right - 30, feed.Height);
+        var map = new RectangleF(feed.X, feed.Bottom + 8, feed.Width, panel.Bottom - feed.Bottom - 26);
         using (var fill = new SolidBrush(Color.FromArgb(12, 17, 17))) g.FillRectangle(fill, map);
         using (var border = new Pen(_edge)) g.DrawRectangle(border, map.X, map.Y, map.Width, map.Height);
-        var placements = new Dictionary<string, PointF>
+        DrawText(g, "CAMERA MAP · SELECT A FEED", _smallFont, _teal, map.X + 12, map.Y + 5, map.Width - 24, 17);
+        var nodeIds = FnafCameras.Select(x => x.Id).ToArray();
+        const int columns = 6;
+        var cellW = (map.Width - 28) / columns;
+        const float nodeH = 30;
+        for (var i = 0; i < nodeIds.Length; i++)
         {
-            ["1A"] = new(.5f, .08f), ["1B"] = new(.5f, .37f), ["1C"] = new(.14f, .1f),
-            ["2A"] = new(.12f, .48f), ["2B"] = new(.12f, .68f), ["3"] = new(.12f, .31f),
-            ["4A"] = new(.88f, .48f), ["4B"] = new(.88f, .68f), ["5"] = new(.5f, .22f),
-            ["6"] = new(.88f, .1f), ["7"] = new(.88f, .31f)
-        };
-        PointF CenterOf(string id) => new(map.X + map.Width * placements[id].X, map.Y + map.Height * placements[id].Y + 17);
-        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1B", "2A"), ("2A", "2B"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B") };
-        using (var corridor = new Pen(Color.FromArgb(85, 95, 83, 65), 3))
-            foreach (var (from, to) in links) g.DrawLine(corridor, CenterOf(from), CenterOf(to));
-        var nodeW = Math.Min(82, map.Width * .43f); const float nodeH = 35;
-        foreach (var (id, point) in placements)
-        {
-            var node = new RectangleF(map.X + map.Width * point.X - nodeW / 2, map.Y + map.Height * point.Y, nodeW, nodeH);
+            var row = i / columns;
+            var column = i % columns;
+            var itemsInRow = Math.Min(columns, nodeIds.Length - row * columns);
+            var rowWidth = itemsInRow * cellW;
+            var rowX = map.X + (map.Width - rowWidth) / 2;
+            var node = new RectangleF(rowX + column * cellW + 4, map.Y + 27 + row * 36, cellW - 8, nodeH);
+            var id = nodeIds[i];
             _cameraSelectRects[id] = node;
             var selected = id == _selectedCamera;
             var occupied = _animatronicCameras.Values.Contains(id, StringComparer.OrdinalIgnoreCase);
             using var nodeFill = new SolidBrush(selected ? Color.FromArgb(53, 39, 21) : Color.FromArgb(24, 31, 30));
             using var nodeEdge = new Pen(occupied ? _red : selected ? _gold : _edge, selected || occupied ? 2 : 1);
             g.FillRectangle(nodeFill, node); g.DrawRectangle(nodeEdge, node.X, node.Y, node.Width, node.Height);
-            DrawText(g, $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 9, node.Width, 17, StringAlignment.Center);
+            DrawText(g, $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 6, node.Width, 17, StringAlignment.Center);
         }
-        var office = new RectangleF(map.X + map.Width * .28f, map.Bottom - 48, map.Width * .44f, 32);
-        using var officeFill = new SolidBrush(Color.FromArgb(61, 28, 26)); g.FillRectangle(officeFill, office);
-        DrawText(g, "OFFICE", _smallFont, _red, office.X, office.Y + 8, office.Width, 17, StringAlignment.Center);
     }
 
     private void DrawOfficeIntruder(Graphics g, RectangleF office, string id)
@@ -1822,6 +1830,7 @@ internal sealed class GameForm : Form
         _payoutAiBonusCollected = 0;
         _payoutAnimatronicBonusCollected = 0;
         _dayResetByDeath = false;
+        _goldenFreddyReady = false; _goldenFreddyEncounterTriggered = false;
         _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
@@ -1832,7 +1841,8 @@ internal sealed class GameForm : Form
         {
             _animatronicCameras[a.Id] = RouteFor(a.Id)[0];
             _animatronicRouteIndices[a.Id] = 0;
-            _nextAttack[a.Id] = Math.Max(5, a.FirstAttackSeconds - _ai[a.Id] / 2);
+            if (!a.Id.Equals("golden-freddy", StringComparison.OrdinalIgnoreCase))
+                _nextAttack[a.Id] = Math.Max(5, a.FirstAttackSeconds - _ai[a.Id] / 2);
         }
         NightSounds.StartAmbience();
         _timer.Start(); SaveActiveSlot(); Invalidate();
@@ -1945,10 +1955,26 @@ internal sealed class GameForm : Form
             Invalidate();
             return;
         }
+        var loweringMonitor = _monitorOpen;
         _monitorOpen = !_monitorOpen;
         if (_monitorOpen) { _cameraMonitorMode = false; _selectedCamera = "1A"; }
         else _cameraMonitorMode = false;
         NightSounds.Play(_monitorOpen ? "monitor-up" : "monitor-down");
+        if (_monitorOpen && _pendingUntil.ContainsKey("golden-freddy"))
+        {
+            _pendingUntil.Remove("golden-freddy"); _resolved.Add("golden-freddy");
+            _officeIntruderId = null; _goldenFreddyReady = false;
+            _message = "Golden Freddy vanished when you raised the monitor.";
+            Invalidate(); return;
+        }
+        if (loweringMonitor && _goldenFreddyReady)
+        {
+            _goldenFreddyReady = false;
+            _officeIntruderId = "golden-freddy"; _officeIntruderUntilUtc = DateTime.UtcNow.AddSeconds(5);
+            _pendingUntil["golden-freddy"] = _seconds + 5; _resolved.Remove("golden-freddy");
+            _message = "Golden Freddy is in the office! Raise the monitor now!";
+            Invalidate(); return;
+        }
         if (!_monitorOpen && _activeOfficeTaskId is not null)
         {
             _activeOfficeTaskId = null;
@@ -1962,6 +1988,17 @@ internal sealed class GameForm : Form
     private static string[] RouteFor(string id) => AnimatronicRoutes.TryGetValue(id, out var route)
         ? route
         : ["1A", "1B", "4A", "4B"];
+
+    private void SelectCamera(string cameraId)
+    {
+        _selectedCamera = cameraId;
+        if (cameraId == "2B" && _stageAnimatronics.Contains("golden-freddy") && _ai.GetValueOrDefault("golden-freddy") > 0 && !_goldenFreddyEncounterTriggered)
+        {
+            _goldenFreddyReady = true;
+            _goldenFreddyEncounterTriggered = true;
+            _message = "The CAM 2B poster changed. Lower the monitor to bring Golden Freddy into the office.";
+        }
+    }
 
     private static int MovementOpportunityInterval(string id) => id.Equals("freddy", StringComparison.OrdinalIgnoreCase) ? 3 : 5;
 
@@ -2006,6 +2043,7 @@ internal sealed class GameForm : Form
     private bool WasHandled(Animatronic a) => a.Action switch
     {
         "door" => IsDoorClosed(a.DoorSide), "foxy" => _leftDoorClosed, "mask" => _maskOn, "lure" => _lureSpent,
+        "golden" => _monitorOpen,
         "listen" => _listening && IsDoorClosed(a.DoorSide), "scan" => _ventScanned, _ => false
     };
 
@@ -2015,6 +2053,7 @@ internal sealed class GameForm : Form
     {
         "door" => $"Movement at the right doorway. Press {KeyLabel(_controlBindings["right-door"])} to close it.",
         "foxy" => $"Foxy is charging from Pirate Cove! Press {KeyLabel(_controlBindings["left-door"])} to shut the left door.",
+        "golden" => $"Golden Freddy is in the office! Press {KeyLabel(_controlBindings["monitor"])} to raise the monitor and dismiss him.",
         "mask" => $"Toy Bonnie is in the hall. Press {KeyLabel(_controlBindings["mask"])} to put on the mask and stay still.",
         "lure" => $"Springtrap is near. Press {KeyLabel(_controlBindings["lure"])} to use the audio lure while ventilation is stable.",
         "listen" => $"Breathing at the left door. Press {KeyLabel(_controlBindings["listen"])} to listen, then {KeyLabel(_controlBindings["left-door"])} to close the left door.",
@@ -2363,7 +2402,7 @@ internal sealed class GameForm : Form
                 foreach (var (cameraId, rect) in _cameraSelectRects)
                 {
                     if (!rect.Contains(p)) continue;
-                    _selectedCamera = cameraId;
+                    SelectCamera(cameraId);
                     NightSounds.Play("camera");
                     Invalidate();
                     return;
@@ -2593,7 +2632,7 @@ internal sealed class GameForm : Form
         {
             var index = Array.FindIndex(FnafCameras, camera => camera.Id == _selectedCamera);
             var direction = e.KeyCode == _controlBindings["camera-prev"] ? -1 : 1;
-            _selectedCamera = FnafCameras[(index + direction + FnafCameras.Length) % FnafCameras.Length].Id;
+            SelectCamera(FnafCameras[(index + direction + FnafCameras.Length) % FnafCameras.Length].Id);
             NightSounds.Play("camera"); Invalidate(); e.Handled = true; e.SuppressKeyPress = true; return;
         }
         var action = _controlBindings.FirstOrDefault(pair => pair.Value == e.KeyCode).Key;
