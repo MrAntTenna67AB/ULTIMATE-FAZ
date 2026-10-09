@@ -1,0 +1,10 @@
+{
+  "games": [
+    { "id": "fnaf1", "slug": "five-nights-at-freddys", "name": "Five Nights at Freddy's", "steamAppId": "319510", "exe": "FiveNightsatFreddys.exe", "role": "primary", "use": "host-source-and-freddy", "animatronicUnlockCost": 0 },
+    { "id": "fnaf2", "slug": "custom-five-nights-at-freddys-2", "name": "Five Nights at Freddy's 2", "steamAppId": "332800", "exe": "FiveNightsatFreddys2.exe", "role": "secondary", "use": "toy-roster-and-mask-rule", "animatronicUnlockCost": 100 },
+    { "id": "fnaf3", "slug": "custom-five-nights-at-freddys-3", "name": "Five Nights at Freddy's 3", "steamAppId": "354140", "exe": "FiveNightsatFreddys3.exe", "role": "secondary", "use": "springtrap-audio-lure-and-ventilation", "animatronicUnlockCost": 150 },
+    { "id": "fnaf4", "slug": "custom-five-nights-at-freddys-4", "name": "Five Nights at Freddy's 4", "steamAppId": "388090", "exe": "FiveNightsatFreddys4.exe", "role": "secondary", "use": "nightmare-threat-and-listening", "animatronicUnlockCost": 200 },
+    { "id": "ffps", "slug": null, "name": "Freddy Fazbear's Pizzeria Simulator", "steamAppId": "738060", "exe": "Pizzeria Simulator.exe", "role": "secondary-unlisted", "use": "pizzeria-day-and-scrap-baby", "animatronicUnlockCost": 250 },
+    { "id": "ucn", "slug": "custom-ultimate-custom-night", "name": "Ultimate Custom Night", "steamAppId": "871720", "exe": "Ultimate Custom Night.exe", "role": "secondary", "use": "custom-ai-levels-0-to-20", "animatronicUnlockCost": 0 }
+  ]
+}
