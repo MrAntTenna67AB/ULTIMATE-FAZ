@@ -69,6 +69,8 @@ internal sealed class GameForm : Form
     private bool _monitorOpen;
     private bool _cameraMonitorMode;
     private string _selectedCamera = "1A";
+    private bool _leftLightOn;
+    private bool _rightLightOn;
     private string? _activeOfficeTaskId;
     private int _officeTaskSecondsRemaining;
     private string? _ventThreatSide;
@@ -156,6 +158,7 @@ internal sealed class GameForm : Form
     private readonly Dictionary<string, RectangleF> _officeTaskRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RectangleF> _officeMonitorTabRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RectangleF> _cameraSelectRects = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RectangleF> _officeLightRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _completedOfficeTasks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly (string Id, string Name, int Seconds, bool Noisy)[] OfficeTasks =
     [
@@ -219,11 +222,16 @@ internal sealed class GameForm : Form
         foreach (var a in sheets.Animatronics) _ai[a.Id] = sheets.DefaultAiLevel;
         _controlBindings["left-door"] = Keys.A;
         _controlBindings["right-door"] = Keys.D;
-        _controlBindings["mask"] = Keys.M;
+        _controlBindings["mask"] = Keys.H;
         _controlBindings["lure"] = Keys.L;
         _controlBindings["listen"] = Keys.Q;
         _controlBindings["scan"] = Keys.V;
         _controlBindings["vent"] = Keys.R;
+        _controlBindings["monitor"] = Keys.M;
+        _controlBindings["camera-prev"] = Keys.Left;
+        _controlBindings["camera-next"] = Keys.Right;
+        _controlBindings["left-light"] = Keys.Z;
+        _controlBindings["right-light"] = Keys.C;
         LoadControlBindings();
         RefreshSaveSlots();
         foreach (var id in _sourceOrder)
@@ -431,14 +439,14 @@ internal sealed class GameForm : Form
         DrawText(g, "CONTROL BINDINGS", _smallFont, _gold, 90, 190, 400, 20);
         DrawText(g, _waitingForBindingAction is null ? _settingsMessage : $"PRESS A KEY FOR {ControlName(_waitingForBindingAction)}  ·  ESC TO CANCEL", _bodyFont, _teal, 90, 220, 1000, 26);
         _settingsBindingRects.Clear();
-        var actions = new[] { "left-door", "right-door", "mask", "lure", "listen", "scan", "vent" };
+        var actions = new[] { "left-door", "right-door", "left-light", "right-light", "monitor", "camera-prev", "camera-next", "mask", "lure", "listen", "scan", "vent" };
         for (var i = 0; i < actions.Length; i++)
         {
             var action = actions[i];
-            var row = new RectangleF(88, 265 + i * 48, 600, 40);
+            var row = new RectangleF(88, 245 + i * 30, 600, 26);
             DrawPanel(g, row, _waitingForBindingAction == action ? Color.FromArgb(41, 37, 21) : _panel);
-            DrawText(g, ControlName(action), _smallFont, _ink, row.X + 16, row.Y + 12, 360, 18);
-            var bind = new RectangleF(row.Right - 152, row.Y + 4, 136, 32);
+            DrawText(g, ControlName(action), _smallFont, _ink, row.X + 16, row.Y + 5, 360, 18);
+            var bind = new RectangleF(row.Right - 152, row.Y + 2, 136, 22);
             _settingsBindingRects[action] = bind;
             DrawButton(g, bind, _waitingForBindingAction == action ? "PRESS KEY" : KeyLabel(_controlBindings[action]), "↵", _waitingForBindingAction == action ? _gold : _teal, Color.FromArgb(13, 20, 21), true);
         }
@@ -449,8 +457,9 @@ internal sealed class GameForm : Form
 
     private static string ControlName(string action) => action switch
     {
-        "left-door" => "Left door", "right-door" => "Right door", "mask" => "Put on mask",
-        "lure" => "Audio lure", "listen" => "Listen", "scan" => "Vent scan", "vent" => "Reset vents", _ => action
+        "left-door" => "Left door", "right-door" => "Right door", "left-light" => "Left doorway light", "right-light" => "Right doorway light",
+        "monitor" => "Raise / lower monitor", "camera-prev" => "Previous camera", "camera-next" => "Next camera",
+        "mask" => "Put on mask", "lure" => "Audio lure", "listen" => "Listen", "scan" => "Vent scan", "vent" => "Reset vents", _ => action
     };
 
     private static string KeyLabel(Keys key) => key switch
@@ -1349,8 +1358,9 @@ internal sealed class GameForm : Form
         DrawText(g, "SYSTEMS", _smallFont, _muted, right.X + 22, right.Y + 147);
         DrawMeter(g, right.X + 22, right.Y + 169, right.Width - 44, "VENTILATION", _vent, 100, _vent > 25 ? _teal : _red);
         DrawMeter(g, right.X + 22, right.Y + 218, right.Width - 44, "DOOR POWER", _doorPower, 100, _doorPower > 25 ? _gold : _red);
+        DrawText(g, "MONITOR 1%/s · CAMS +1%/s · EACH LIGHT 1%/s", _smallFont, _muted, right.X + 22, right.Y + 251, right.Width - 44, 15);
         _monitorToggleRect = new RectangleF(right.X + 22, right.Y + 272, right.Width - 44, 37);
-        DrawButton(g, _monitorToggleRect, _monitorOpen ? "LOWER MONITOR · CANCEL TASK" : "RAISE MONITOR · TASKS / CAMERAS", "M", _gold, Color.FromArgb(29, 26, 18), true);
+        DrawButton(g, _monitorToggleRect, _monitorOpen ? "LOWER MONITOR · CANCEL TASK" : "RAISE MONITOR · TASKS / CAMERAS", KeyLabel(_controlBindings["monitor"]), _gold, Color.FromArgb(29, 26, 18), true);
         DrawNightAction(g, right, "left-door", KeyLabel(_controlBindings["left-door"]), _leftDoorClosed ? "OPEN LEFT" : _doorPower > 0 ? "CLOSE LEFT" : "NO POWER", 0);
         DrawNightAction(g, right, "right-door", KeyLabel(_controlBindings["right-door"]), _rightDoorClosed ? "OPEN RIGHT" : _doorPower > 0 ? "CLOSE RIGHT" : "NO POWER", 1);
         DrawNightAction(g, right, "mask", KeyLabel(_controlBindings["mask"]), "PUT ON MASK", 2);
@@ -1387,6 +1397,9 @@ internal sealed class GameForm : Form
         DrawOfficeDoor(g, new RectangleF(r.Right - 199, r.Y + 65, 98, 330), _rightDoorClosed);
         DrawDoorWarning(g, r, "left");
         DrawDoorWarning(g, r, "right");
+        _officeLightRects.Clear();
+        DrawDoorLight(g, r, "left");
+        DrawDoorLight(g, r, "right");
         DrawOfficeVent(g, r, "left");
         DrawOfficeVent(g, r, "right");
         DrawVentWarning(g, r);
@@ -1547,6 +1560,34 @@ internal sealed class GameForm : Form
         using var doorEdge = new Pen(Color.FromArgb(205, _gold), 2);
         g.FillRectangle(doorFill, door); g.DrawRectangle(doorEdge, door.X, door.Y, door.Width, door.Height);
         for (var y = door.Y + 28; y < door.Bottom - 8; y += 34) DrawLine(g, Color.FromArgb(105, 209, 182, 121), 1, door.X + 8, y, door.Right - 8, y);
+    }
+
+    private void DrawDoorLight(Graphics g, RectangleF office, string side)
+    {
+        var left = side == "left";
+        var door = new RectangleF(left ? office.X + 101 : office.Right - 199, office.Y + 65, 98, 330);
+        var on = left ? _leftLightOn : _rightLightOn;
+        if (on)
+        {
+            using var glow = new SolidBrush(Color.FromArgb(72, 250, 211, 123));
+            g.FillRectangle(glow, door);
+            var terminal = left ? "2B" : "4B";
+            var threat = _sheets.Animatronics.FirstOrDefault(a => _animatronicCameras.TryGetValue(a.Id, out var camera) && camera == terminal);
+            if (threat is not null && _portraitArt.TryGetValue(threat.Id, out var portrait))
+            {
+                var figure = new RectangleF(door.X + 18, door.Y + 70, door.Width - 36, 185);
+                g.DrawImage(portrait, figure);
+                using var frame = new Pen(Color.FromArgb(190, _gold), 2);
+                g.DrawRectangle(frame, figure.X, figure.Y, figure.Width, figure.Height);
+                DrawText(g, threat.Name.ToUpperInvariant(), _smallFont, _gold, door.X - 24, figure.Bottom + 6, door.Width + 48, 24, StringAlignment.Center);
+            }
+        }
+        var button = new RectangleF(left ? door.Right + 5 : door.X - 68, door.Bottom - 47, 63, 34);
+        _officeLightRects[side + "-light"] = button;
+        using var fill = new SolidBrush(on ? Color.FromArgb(77, 59, 22) : Color.FromArgb(19, 25, 25));
+        using var edge = new Pen(on ? _gold : _edge, on ? 2 : 1);
+        g.FillRectangle(fill, button); g.DrawRectangle(edge, button.X, button.Y, button.Width, button.Height);
+        DrawText(g, on ? "LIT" : "LIGHT", _smallFont, on ? _gold : _muted, button.X, button.Y + 9, button.Width, 18, StringAlignment.Center);
     }
 
     private void DrawDeskFan(Graphics g, float x, float y)
@@ -1770,7 +1811,7 @@ internal sealed class GameForm : Form
         _payoutAiBonusCollected = 0;
         _dayResetByDeath = false;
         _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _doorPowerRechargeCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
-        _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
+        _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
             ? "No animatronics tonight. Raise the terminal monitor and finish all 11 office tasks."
             : $"Raise the terminal monitor and finish all 11 tasks. Survival earns ${_payoutForNight:N0}; loud printing can draw threats in.";
@@ -1792,6 +1833,7 @@ internal sealed class GameForm : Form
         {
             _completedOfficeTasks.Add(_activeOfficeTaskId);
             var finished = OfficeTasks.First(t => t.Id == _activeOfficeTaskId).Name;
+            NightSounds.Play("task");
             _activeOfficeTaskId = null;
             _officeTaskSecondsRemaining = 0;
             _seconds = Math.Min(NightSteps, _seconds + 3);
@@ -1804,6 +1846,7 @@ internal sealed class GameForm : Form
             }
         }
         var closedDoorCount = (_leftDoorClosed ? 1 : 0) + (_rightDoorClosed ? 1 : 0);
+        var equipmentDraw = (_monitorOpen ? 1 : 0) + (_cameraMonitorMode ? 1 : 0) + (_leftLightOn ? 1 : 0) + (_rightLightOn ? 1 : 0);
         if (closedDoorCount > 0)
         {
             if (++_doorPowerDrainCounter >= 5)
@@ -1818,7 +1861,7 @@ internal sealed class GameForm : Form
                 _message = "Door power depleted. Both doors opened.";
             }
         }
-        else
+        else if (equipmentDraw == 0)
         {
             _doorPowerDrainCounter = 0;
             if (++_doorPowerRechargeCounter >= 3)
@@ -1827,7 +1870,20 @@ internal sealed class GameForm : Form
                 _doorPowerRechargeCounter = 0;
             }
         }
-        if (closedDoorCount > 0) _doorPowerRechargeCounter = 0;
+        else { _doorPowerDrainCounter = 0; _doorPowerRechargeCounter = 0; }
+        if (closedDoorCount > 0 || equipmentDraw > 0) _doorPowerRechargeCounter = 0;
+        if (equipmentDraw > 0)
+        {
+            _doorPower = Math.Max(0, _doorPower - equipmentDraw);
+            if (_doorPower == 0)
+            {
+                _leftDoorClosed = false; _rightDoorClosed = false;
+                _leftLightOn = false; _rightLightOn = false;
+                _monitorOpen = false; _cameraMonitorMode = false;
+                _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0;
+                _message = "Power depleted. Doors opened; monitor and doorway lights shut down.";
+            }
+        }
         if (_ventCooldown > 0) _ventCooldown--;
         if (_seconds % 4 == 0)
         {
@@ -1852,6 +1908,7 @@ internal sealed class GameForm : Form
                         _pendingUntil[a.Id] = _seconds + _random.Next(3, 7);
                         _resolved.Remove(a.Id);
                         _message = WarningFor(a);
+                        NightSounds.Play("warning");
                         if (a.Action == "scan") _ventThreatSide = route[^1] == "V1" ? "left" : "right";
                     }
                 }
@@ -1860,7 +1917,7 @@ internal sealed class GameForm : Form
             if (_pendingUntil.TryGetValue(a.Id, out var until) && until <= _seconds && !_resolved.Contains(a.Id))
             {
                 if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} moved away"; _message = _lastResolved + ". Stay alert."; _animatronicRouteIndices[a.Id] = Math.Max(0, _animatronicRouteIndices.GetValueOrDefault(a.Id) - 2); _animatronicCameras[a.Id] = RouteFor(a.Id)[_animatronicRouteIndices[a.Id]]; }
-                else { _strikes++; _officeIntruderId = a.Id; _officeIntruderUntilUtc = DateTime.UtcNow.AddMilliseconds(1900); _lastResolved = $"{a.Name} entered the office"; _message = $"{_lastResolved}. Strike {_strikes} of 3."; }
+                else { _strikes++; _officeIntruderId = a.Id; _officeIntruderUntilUtc = DateTime.UtcNow.AddMilliseconds(1900); _lastResolved = $"{a.Name} entered the office"; _message = $"{_lastResolved}. Strike {_strikes} of 3."; NightSounds.Play("approach"); }
                 _resolved.Add(a.Id); _pendingUntil.Remove(a.Id); _listening = false; _ventScanned = false;
                 if (a.Action == "scan") _ventThreatSide = null;
             }
@@ -1872,8 +1929,15 @@ internal sealed class GameForm : Form
 
     private void ToggleOfficeMonitor()
     {
+        if (!_monitorOpen && _doorPower <= 0)
+        {
+            _message = "No power available for the monitor.";
+            Invalidate();
+            return;
+        }
         _monitorOpen = !_monitorOpen;
         if (_monitorOpen) { _cameraMonitorMode = false; _selectedCamera = "1A"; }
+        NightSounds.Play(_monitorOpen ? "monitor-up" : "monitor-down");
         if (!_monitorOpen && _activeOfficeTaskId is not null)
         {
             _activeOfficeTaskId = null;
@@ -1920,6 +1984,7 @@ internal sealed class GameForm : Form
     private void BeginJumpscare(string? animatronicId)
     {
         _timer.Stop();
+        NightSounds.Play("jumpscare");
         _jumpscareAnimatronicId = animatronicId;
         _jumpscareActive = true;
         _jumpscareTimer.Start();
@@ -1947,7 +2012,8 @@ internal sealed class GameForm : Form
     private int ActiveThreatCount() => _sheets.Animatronics.Count(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0);
     private bool ActionAvailable(string action) => action switch
     {
-        "left-door" or "right-door" => true, "door" => true, "mask" => _owned.Contains("toy-bonnie"), "lure" => _owned.Contains("springtrap"),
+        "left-door" or "right-door" => true, "left-light" => _leftLightOn || _doorPower > 0, "right-light" => _rightLightOn || _doorPower > 0,
+        "door" => true, "mask" => _owned.Contains("toy-bonnie"), "lure" => _owned.Contains("springtrap"),
         "listen" => _owned.Contains("nightmare-chica") && !_listening && _pendingUntil.TryGetValue("nightmare-chica", out var until) && until > _seconds && !_resolved.Contains("nightmare-chica"),
         "scan" => _owned.Contains("scrap-baby"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby"), _ => false
     };
@@ -1966,6 +2032,16 @@ internal sealed class GameForm : Form
                 else if (_doorPower > 0) { _rightDoorClosed = true; _message = "Right door closed. Shared power drains while doors are shut."; }
                 else _message = "No door power. Open the doors to recharge.";
                 break;
+            case "left-light":
+                _leftLightOn = !_leftLightOn;
+                _message = _leftLightOn ? "Left doorway illuminated. Light uses 1% power each second." : "Left doorway light off.";
+                NightSounds.Play("light");
+                break;
+            case "right-light":
+                _rightLightOn = !_rightLightOn;
+                _message = _rightLightOn ? "Right doorway illuminated. Light uses 1% power each second." : "Right doorway light off.";
+                NightSounds.Play("light");
+                break;
             case "mask": _maskOn = !_maskOn; _message = _maskOn ? "Mask on. Keep still." : "Mask off."; break;
             case "lure": if (!_lureSpent && _vent >= 25) { _lureSpent = true; _message = "Audio lure sent down the hall."; } else _message = "Lure needs 25% ventilation. Reset the vents first."; break;
             case "listen":
@@ -1979,6 +2055,7 @@ internal sealed class GameForm : Form
             case "scan": _ventScanned = true; _message = "Vent scan complete. Keep the ducts clear."; break;
             case "vent": if (_ventCooldown <= 0) { _vent = 100; _ventCooldown = 10; _lureSpent = false; _message = "Ventilation restored. Audio lure is ready."; } else _message = $"Vent reset cooling down: {_ventCooldown}s."; break;
         }
+        if (action is "left-door" or "right-door") NightSounds.Play("door");
         Invalidate();
     }
 
@@ -2254,6 +2331,7 @@ internal sealed class GameForm : Form
                 {
                     if (!rect.Contains(p)) continue;
                     _cameraMonitorMode = tabId == "cameras";
+                    NightSounds.Play("task");
                     Invalidate();
                     return;
                 }
@@ -2261,11 +2339,17 @@ internal sealed class GameForm : Form
                 {
                     if (!rect.Contains(p)) continue;
                     _selectedCamera = cameraId;
+                    NightSounds.Play("task");
                     Invalidate();
                     return;
                 }
                 foreach (var (taskId, rect) in _officeTaskRects)
                     if (rect.Contains(p)) { StartOfficeTask(taskId); return; }
+            }
+            else
+            {
+                foreach (var (lightId, rect) in _officeLightRects)
+                    if (rect.Contains(p)) { UseAction(lightId); return; }
             }
             foreach (var (action, rect) in _nightActionRects)
                 if (rect.Contains(p) && ActionAvailable(action)) { UseAction(action); return; }
@@ -2479,7 +2563,14 @@ internal sealed class GameForm : Form
             Invalidate(); return;
         }
         if (!_nightStarted || _nightOver) return;
-        if (e.KeyCode == Keys.M) { ToggleOfficeMonitor(); e.Handled = true; e.SuppressKeyPress = true; return; }
+        if (e.KeyCode == _controlBindings["monitor"]) { ToggleOfficeMonitor(); e.Handled = true; e.SuppressKeyPress = true; return; }
+        if (_monitorOpen && _cameraMonitorMode && (e.KeyCode == _controlBindings["camera-prev"] || e.KeyCode == _controlBindings["camera-next"]))
+        {
+            var index = Array.FindIndex(FnafCameras, camera => camera.Id == _selectedCamera);
+            var direction = e.KeyCode == _controlBindings["camera-prev"] ? -1 : 1;
+            _selectedCamera = FnafCameras[(index + direction + FnafCameras.Length) % FnafCameras.Length].Id;
+            NightSounds.Play("task"); Invalidate(); e.Handled = true; e.SuppressKeyPress = true; return;
+        }
         var action = _controlBindings.FirstOrDefault(pair => pair.Value == e.KeyCode).Key;
         if (action is not null && ActionAvailable(action)) UseAction(action);
     }
