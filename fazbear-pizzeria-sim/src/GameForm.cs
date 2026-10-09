@@ -49,12 +49,12 @@ internal sealed class GameForm : Form
     private int _ventCooldown;
     private int _doorPower = 100;
     private int _doorPowerDrainCounter;
-    private int _doorPowerRechargeCounter;
     private int _payoutPaidDay;
     private int _lawsuitCheckedDay;
     private int _payoutForNight;
     private int _payoutCollectedThisNight;
     private int _payoutAiBonusCollected;
+    private int _payoutAnimatronicBonusCollected;
     private int _konamiIndex;
     private int _nightSkipCheatIndex;
     private DateTime _cheatToastUntilUtc;
@@ -179,7 +179,9 @@ internal sealed class GameForm : Form
     private static readonly Dictionary<string, string[]> AnimatronicRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["freddy"] = ["1A", "1B", "7", "6", "4A", "4B"],
+        ["foxy"] = ["1C", "2A", "2B"],
         ["bonnie"] = ["1A", "1B", "2A", "2B"],
+        ["chica"] = ["1A", "1B", "7", "4A", "4B"],
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
         ["springtrap"] = ["1A", "5", "3", "2A", "2B"],
         ["nightmare-chica"] = ["1A", "1B", "6", "2A", "2B"],
@@ -209,7 +211,8 @@ internal sealed class GameForm : Form
         string[] StagedAnimatronics, string[] BuiltAttractions, Dictionary<string, int> AttractionTiles,
         Dictionary<string, int> AiLevels, string[] UnlockedAnimatronicGames, int PayoutPaidDay, int LawsuitCheckedDay,
         int PrepScreen, bool NightOver, bool NightWon, int PayoutCollectedThisNight, int LawsuitsThisShift, int LawsuitFeesThisShift,
-        int AiPayoutBonus = 0, DayStartSnapshot? DayStartState = null, int NightStrikes = 0, bool DayResetByDeath = false);
+        int AiPayoutBonus = 0, DayStartSnapshot? DayStartState = null, int NightStrikes = 0, bool DayResetByDeath = false,
+        int AnimatronicPayoutBonus = 0);
     private DayStartSnapshot? _dayStartSnapshot;
 
     public GameForm(DesignSheets sheets, Dictionary<string, SourceInstall> sources, bool demo)
@@ -532,6 +535,7 @@ internal sealed class GameForm : Form
         _lawsuitCheckedDay = 0;
         _payoutCollectedThisNight = 0;
         _payoutAiBonusCollected = 0;
+        _payoutAnimatronicBonusCollected = 0;
         _lawsuitsThisShift = 0;
         _lawsuitFeesThisShift = 0;
         _owned.Clear();
@@ -573,6 +577,7 @@ internal sealed class GameForm : Form
         _lawsuitCheckedDay = Math.Max(0, data.LawsuitCheckedDay);
         _payoutCollectedThisNight = Math.Max(0, data.PayoutCollectedThisNight);
         _payoutAiBonusCollected = Math.Max(0, data.AiPayoutBonus);
+        _payoutAnimatronicBonusCollected = Math.Max(0, data.AnimatronicPayoutBonus);
         _strikes = Math.Clamp(data.NightStrikes, 0, 3);
         _dayResetByDeath = data.DayResetByDeath;
         _lawsuitsThisShift = Math.Max(0, data.LawsuitsThisShift);
@@ -630,7 +635,7 @@ internal sealed class GameForm : Form
                 new Dictionary<string, int>(_ai, StringComparer.OrdinalIgnoreCase),
                 _unlockedAnimatronicGames.Order(StringComparer.OrdinalIgnoreCase).ToArray(), _payoutPaidDay, _lawsuitCheckedDay,
                 (int)_prepScreen, _nightOver, _nightWon, _payoutCollectedThisNight, _lawsuitsThisShift, _lawsuitFeesThisShift,
-                _payoutAiBonusCollected, _dayStartSnapshot, _strikes, _dayResetByDeath);
+                _payoutAiBonusCollected, _dayStartSnapshot, _strikes, _dayResetByDeath, _payoutAnimatronicBonusCollected);
             File.WriteAllText(temporary, JsonSerializer.Serialize(data));
             File.Move(temporary, path, true);
             RefreshSaveSlots();
@@ -676,6 +681,7 @@ internal sealed class GameForm : Form
         _unlockedAnimatronicGames.UnionWith(snapshot.UnlockedAnimatronicGames.Where(id => _sheets.Games.Any(game => game.Id == id)));
         _payoutCollectedThisNight = 0;
         _payoutAiBonusCollected = 0;
+        _payoutAnimatronicBonusCollected = 0;
         _lawsuitsThisShift = 0;
         _lawsuitFeesThisShift = 0;
     }
@@ -1362,7 +1368,7 @@ internal sealed class GameForm : Form
         DrawText(g, "SYSTEMS", _smallFont, _muted, right.X + 22, right.Y + 147);
         DrawMeter(g, right.X + 22, right.Y + 169, right.Width - 44, "VENTILATION", _vent, 100, _vent > 25 ? _teal : _red);
         DrawMeter(g, right.X + 22, right.Y + 218, right.Width - 44, "DOOR POWER", _doorPower, 100, _doorPower > 25 ? _gold : _red);
-        DrawText(g, "ACTIVE: MON 1%/s · CAMS +1%/s · LIGHTS 1%/s", _smallFont, _muted, right.X + 22, right.Y + 251, right.Width - 44, 15);
+        DrawText(g, "DRAIN WHEN ON: MON 1%/s · CAMS 1%/s · LIGHTS 1%/s", _smallFont, _muted, right.X + 22, right.Y + 251, right.Width - 44, 15);
         _monitorToggleRect = new RectangleF(right.X + 22, right.Y + 272, right.Width - 44, 37);
         DrawButton(g, _monitorToggleRect, _monitorOpen ? "LOWER MONITOR · CANCEL TASK" : "RAISE MONITOR · TASKS / CAMERAS", KeyLabel(_controlBindings["monitor"]), _gold, Color.FromArgb(29, 26, 18), true);
         DrawNightAction(g, right, "left-door", KeyLabel(_controlBindings["left-door"]), _leftDoorClosed ? "OPEN LEFT" : _doorPower > 0 ? "CLOSE LEFT" : "NO POWER", 0);
@@ -1685,7 +1691,7 @@ internal sealed class GameForm : Form
         var payoutMessage = _dayResetByDeath
             ? "Caught on the third strike. Today's purchases were undone; day-start funds and inventory restored."
             : _nightWon
-                ? $"Pizzeria payout +${_payoutCollectedThisNight:N0} (AI +${_payoutAiBonusCollected:N0}; {_strikes} strikes, −{Math.Min(100, _strikes * 25)}%)."
+                ? $"Payout +${_payoutCollectedThisNight:N0} (AI +${_payoutAiBonusCollected:N0}; threat bonus +${_payoutAnimatronicBonusCollected:N0}; {_strikes} strikes)."
                 : "Shift failed. No pizzeria payout.";
         DrawText(g, payoutMessage, _bodyFont, _muted, 0, 279, DesignWidth, 34, StringAlignment.Center);
         var lawsuitMessage = _lawsuitsThisShift == 0 ? "No lawsuits filed this day." : $"{_lawsuitsThisShift} LAWSUIT{(_lawsuitsThisShift == 1 ? "" : "S")}  ·  SETTLED FOR ${_lawsuitFeesThisShift:N0}";
@@ -1814,8 +1820,9 @@ internal sealed class GameForm : Form
         _payoutForNight = _payoutPaidDay == _day ? 0 : NightlyPayout();
         _payoutCollectedThisNight = 0;
         _payoutAiBonusCollected = 0;
+        _payoutAnimatronicBonusCollected = 0;
         _dayResetByDeath = false;
-        _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _doorPowerRechargeCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
+        _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
             ? "No animatronics tonight. Raise the terminal monitor and finish all 11 office tasks."
@@ -1823,7 +1830,7 @@ internal sealed class GameForm : Form
         _pendingUntil.Clear(); _nextAttack.Clear(); _resolved.Clear(); _animatronicCameras.Clear(); _animatronicRouteIndices.Clear();
         foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
-            _animatronicCameras[a.Id] = "1A";
+            _animatronicCameras[a.Id] = RouteFor(a.Id)[0];
             _animatronicRouteIndices[a.Id] = 0;
             _nextAttack[a.Id] = Math.Max(5, a.FirstAttackSeconds - _ai[a.Id] / 2);
         }
@@ -1871,14 +1878,9 @@ internal sealed class GameForm : Form
         else if (equipmentDraw == 0)
         {
             _doorPowerDrainCounter = 0;
-            if (++_doorPowerRechargeCounter >= 3)
-            {
-                _doorPower = Math.Min(100, _doorPower + 3);
-                _doorPowerRechargeCounter = 0;
-            }
+            _doorPower = Math.Min(100, _doorPower + 1);
         }
-        else { _doorPowerDrainCounter = 0; _doorPowerRechargeCounter = 0; }
-        if (closedDoorCount > 0 || equipmentDraw > 0) _doorPowerRechargeCounter = 0;
+        else _doorPowerDrainCounter = 0;
         if (equipmentDraw > 0)
         {
             _doorPower = Math.Max(0, _doorPower - equipmentDraw);
@@ -1904,8 +1906,8 @@ internal sealed class GameForm : Form
             {
                 var route = RouteFor(a.Id);
                 // FNaF 1 uses movement opportunities: each check is an AI/20 roll.
-                // The camera monitor pauses movement for threats visible on the feed.
-                var cameraPaused = _cameraMonitorMode && _monitorOpen && a.Id.Equals("freddy", StringComparison.OrdinalIgnoreCase);
+                // Checking cameras holds Freddy in place and slows Foxy's advance from Pirate Cove.
+                var cameraPaused = _cameraMonitorMode && _monitorOpen && (a.Id.Equals("freddy", StringComparison.OrdinalIgnoreCase) || a.Id.Equals("foxy", StringComparison.OrdinalIgnoreCase));
                 if (!cameraPaused && _random.Next(1, 21) <= _ai[a.Id])
                 {
                     var routeIndex = Math.Min(route.Length - 1, _animatronicRouteIndices.GetValueOrDefault(a.Id) + 1);
@@ -2003,7 +2005,7 @@ internal sealed class GameForm : Form
 
     private bool WasHandled(Animatronic a) => a.Action switch
     {
-        "door" => IsDoorClosed(a.DoorSide), "mask" => _maskOn, "lure" => _lureSpent,
+        "door" => IsDoorClosed(a.DoorSide), "foxy" => _leftDoorClosed, "mask" => _maskOn, "lure" => _lureSpent,
         "listen" => _listening && IsDoorClosed(a.DoorSide), "scan" => _ventScanned, _ => false
     };
 
@@ -2012,6 +2014,7 @@ internal sealed class GameForm : Form
     private string WarningFor(Animatronic a) => a.Action switch
     {
         "door" => $"Movement at the right doorway. Press {KeyLabel(_controlBindings["right-door"])} to close it.",
+        "foxy" => $"Foxy is charging from Pirate Cove! Press {KeyLabel(_controlBindings["left-door"])} to shut the left door.",
         "mask" => $"Toy Bonnie is in the hall. Press {KeyLabel(_controlBindings["mask"])} to put on the mask and stay still.",
         "lure" => $"Springtrap is near. Press {KeyLabel(_controlBindings["lure"])} to use the audio lure while ventilation is stable.",
         "listen" => $"Breathing at the left door. Press {KeyLabel(_controlBindings["listen"])} to listen, then {KeyLabel(_controlBindings["left-door"])} to close the left door.",
@@ -2047,11 +2050,13 @@ internal sealed class GameForm : Form
                 _leftLightOn = !_leftLightOn;
                 _message = _leftLightOn ? "Left doorway illuminated. Light uses 1% power each second." : "Left doorway light off.";
                 if (_leftLightOn) NightSounds.Play(ThreatWaitingAt("left") ? "light-spotted" : "light");
+                else NightSounds.StopDoorLightSound();
                 break;
             case "right-light":
                 _rightLightOn = !_rightLightOn;
                 _message = _rightLightOn ? "Right doorway illuminated. Light uses 1% power each second." : "Right doorway light off.";
                 if (_rightLightOn) NightSounds.Play(ThreatWaitingAt("right") ? "light-spotted" : "light");
+                else NightSounds.StopDoorLightSound();
                 break;
             case "mask": _maskOn = !_maskOn; _message = _maskOn ? "Mask on. Keep still." : "Mask off."; break;
             case "lure": if (!_lureSpent && _vent >= 25) { _lureSpent = true; _message = "Audio lure sent down the hall."; } else _message = "Lure needs 25% ventilation. Reset the vents first."; break;
@@ -2082,10 +2087,14 @@ internal sealed class GameForm : Form
         if (win && _payoutPaidDay != _day)
         {
             var aiBonusBeforeStrikePenalty = (int)Math.Round(_payoutForNight * StagedAiPayoutMultiplier(), MidpointRounding.AwayFromZero);
-            var grossPayout = _payoutForNight + aiBonusBeforeStrikePenalty;
+            var animatronicBonusBeforeStrikePenalty = _sheets.Animatronics
+                .Where(a => _stageAnimatronics.Contains(a.Id) && _owned.Contains(a.Id) && _ai[a.Id] > 0)
+                .Sum(_ => Random.Shared.Next(1, 11));
+            var grossPayout = _payoutForNight + aiBonusBeforeStrikePenalty + animatronicBonusBeforeStrikePenalty;
             var strikePenalty = Math.Min(1d, _strikes * .25d);
             _payoutCollectedThisNight = (int)Math.Floor(grossPayout * (1d - strikePenalty));
             _payoutAiBonusCollected = (int)Math.Round(aiBonusBeforeStrikePenalty * (1d - strikePenalty), MidpointRounding.AwayFromZero);
+            _payoutAnimatronicBonusCollected = (int)Math.Floor(animatronicBonusBeforeStrikePenalty * (1d - strikePenalty));
             _funds += _payoutCollectedThisNight;
             _payoutPaidDay = _day;
         }

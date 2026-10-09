@@ -16,7 +16,7 @@ foreach($a in $anim.animatronics) {
   foreach($field in @('id','name','gameId','rule','action')) { if([string]::IsNullOrWhiteSpace([string]$a.$field)) { $errors.Add("animatronics.$($a.id): missing $field") } }
   if($a.gameId -notin $gameIds) { $errors.Add("animatronics.$($a.id): unresolved game $($a.gameId)") }
   if($a.cost -lt 0 -or $a.firstAttackSeconds -lt 1 -or $a.warningSeconds -lt 1) { $errors.Add("animatronics.$($a.id): invalid numeric column") }
-  if($a.action -notin @('door','mask','lure','listen','scan')) { $errors.Add("animatronics.$($a.id): unknown action $($a.action)") }
+  if($a.action -notin @('door','foxy','mask','lure','listen','scan')) { $errors.Add("animatronics.$($a.id): unknown action $($a.action)") }
   if($a.action -in @('door','listen') -and $a.doorSide -notin @('left','right')) { $errors.Add("animatronics.$($a.id): door threat must name left or right side") }
   foreach($field in @('atmosphere','healthSafety','entertainment','bonusRevenue')) { if($null -eq $a.$field -or $a.$field -lt 0) { $errors.Add("animatronics.$($a.id): missing or invalid rating field $field") } }
   if(-not (Test-Path -LiteralPath (Join-Path $root "assets\portraits\$($a.id).png"))) { $errors.Add("animatronics.$($a.id): missing matching portrait asset assets/portraits/$($a.id).png") }
@@ -33,7 +33,7 @@ foreach($s in $systems.systems) {
   if($s.fields.Count -eq 0) { $errors.Add("systems.$($s.id): no property columns") }
 }
 if($games.games.Count -ne 6) { $errors.Add('Expected six game source rows.') }
-if($anim.animatronics.Count -ne 6) { $errors.Add('The test roster must have one sample from each game, Bonnie, and UCN night settings.') }
+  if($anim.animatronics.Count -ne 8) { $errors.Add('The prototype roster must include FNAF 1 Freddy, Bonnie, Chica, and Foxy, samples from the other games, and UCN night settings.') }
 if($anim.defaultAiLevel -lt 0 -or $anim.defaultAiLevel -gt $anim.maximumAiLevel) { $errors.Add('Invalid default AI level bounds.') }
 if($anim.startingFunds -ne 200) { $errors.Add('The agreed starting budget must be $200.') }
 if('freddy' -notin @($anim.animatronics | ForEach-Object id)) { $errors.Add('The starter Freddy animatronic must remain in the roster.') }

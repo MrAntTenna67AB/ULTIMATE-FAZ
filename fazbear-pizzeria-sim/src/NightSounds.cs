@@ -29,6 +29,11 @@ internal static class NightSounds
     private static string SoundDirectory => Path.Combine(AppContext.BaseDirectory, "sound-bank");
     private static LoadedSound? _menuTheme;
     private static System.Threading.Timer? _victoryTimer;
+    private static System.Threading.Timer? _ambienceResumeTimer;
+    private static LoadedSound? _activeEffect;
+    private static string? _activeEffectCue;
+    private static bool _ambienceRequested;
+    private static int _effectGeneration;
 
     public static void StartMenuMusic()
     {
@@ -70,10 +75,49 @@ internal static class NightSounds
             {
                 if (!Effects.TryGetValue(cue, out var file)) return;
                 var sound = Load(file, 1);
-                sound?.Player.Play();
+                if (sound is null) return;
+                _ambienceResumeTimer?.Dispose();
+                _ambienceResumeTimer = null;
+                sound.Player.Play();
+                _activeEffect = sound;
+                _activeEffectCue = cue;
+                var generation = ++_effectGeneration;
+                if (_ambienceRequested)
+                {
+                    var durationMs = Math.Clamp((int)Math.Ceiling(GetWaveDurationSeconds(Path.Combine(SoundDirectory, file)) * 1000), 150, 30000);
+                    _ambienceResumeTimer = new System.Threading.Timer(_ => ResumeSoundscape(generation), null, durationMs, System.Threading.Timeout.Infinite);
+                }
             }
         }
         catch (Exception) { /* Optional audio must never interrupt the game. */ }
+    }
+
+    public static void StopDoorLightSound()
+    {
+        lock (Sync)
+        {
+            if (_activeEffectCue is not ("light" or "light-spotted")) return;
+            _ambienceResumeTimer?.Dispose();
+            _ambienceResumeTimer = null;
+            ++_effectGeneration;
+            try { _activeEffect?.Player.Stop(); } catch (Exception) { }
+            _activeEffect = null;
+            _activeEffectCue = null;
+            if (_ambienceRequested) StartAmbienceCore();
+        }
+    }
+
+    private static void ResumeSoundscape(int generation)
+    {
+        lock (Sync)
+        {
+            if (generation != _effectGeneration || !_ambienceRequested) return;
+            _ambienceResumeTimer?.Dispose();
+            _ambienceResumeTimer = null;
+            _activeEffect = null;
+            _activeEffectCue = null;
+            StartAmbienceCore();
+        }
     }
 
     public static void PlayVictorySequence()
@@ -119,15 +163,103 @@ internal static class NightSounds
         }
         lock (Sync)
         {
-            StopAmbienceCore();
-            StartLoop("office ambience2.wav", .30);
-            StartLoop("Buzz_Fan_Florescent2 (plays at a low sound in the office).wav", .12);
+            _ambienceRequested = true;
+            _ambienceResumeTimer?.Dispose();
+            _ambienceResumeTimer = null;
+            ++_effectGeneration;
+            StartAmbienceCore();
         }
     }
 
     public static void StopAmbience()
     {
-        lock (Sync) StopAmbienceCore();
+        lock (Sync)
+        {
+            _ambienceRequested = false;
+            _ambienceResumeTimer?.Dispose();
+            _ambienceResumeTimer = null;
+            ++_effectGeneration;
+            try { _activeEffect?.Player.Stop(); } catch (Exception) { }
+            _activeEffect = null;
+            _activeEffectCue = null;
+            StopAmbienceCore();
+        }
+    }
+
+    private static void StartAmbienceCore()
+    {
+        StopAmbienceCore();
+        var officePath = Path.Combine(SoundDirectory, "office ambience2.wav");
+        var fanPath = Path.Combine(SoundDirectory, "Buzz_Fan_Florescent2 (plays at a low sound in the office).wav");
+        LoadedSound? mixed = null;
+        try
+        {
+            if (File.Exists(officePath) && File.Exists(fanPath))
+            {
+                var wave = MixAmbience(File.ReadAllBytes(officePath), File.ReadAllBytes(fanPath), .30, .12);
+                var stream = new MemoryStream(wave, writable: false);
+                mixed = new LoadedSound(new SoundPlayer(stream), stream);
+                mixed.Player.Load();
+            }
+        }
+        catch (Exception) { mixed = null; }
+        if (mixed is not null)
+        {
+            try { mixed.Player.PlayLooping(); AmbiencePlayers.Add(mixed); return; }
+            catch (Exception) { }
+        }
+        StartLoop("office ambience2.wav", .30);
+    }
+
+    private static byte[] MixAmbience(byte[] office, byte[] fan, double officeGain, double fanGain)
+    {
+        static (short format, short channels, int rate, short bits, byte[] fmt, byte[] data) Read(byte[] wav)
+        {
+            if (wav.Length < 44 || System.Text.Encoding.ASCII.GetString(wav, 0, 4) != "RIFF") throw new InvalidDataException();
+            short format = 0, channels = 0, bits = 0; var rate = 0; byte[]? fmt = null; byte[]? data = null;
+            for (var offset = 12; offset + 8 <= wav.Length;)
+            {
+                var chunk = System.Text.Encoding.ASCII.GetString(wav, offset, 4);
+                var size = BitConverter.ToInt32(wav, offset + 4);
+                if (size < 0 || offset + 8L + size > wav.Length) throw new InvalidDataException();
+                if (chunk == "fmt " && size >= 16)
+                {
+                    format = BitConverter.ToInt16(wav, offset + 8); channels = BitConverter.ToInt16(wav, offset + 10);
+                    rate = BitConverter.ToInt32(wav, offset + 12); bits = BitConverter.ToInt16(wav, offset + 22);
+                    fmt = wav.AsSpan(offset + 8, size).ToArray();
+                }
+                else if (chunk == "data") data = wav.AsSpan(offset + 8, size).ToArray();
+                offset += 8 + size + (size & 1);
+            }
+            if (format != 1 || fmt is null || data is null) throw new InvalidDataException();
+            return (format, channels, rate, bits, fmt, data);
+        }
+
+        var a = Read(office); var b = Read(fan);
+        if (a.channels != b.channels || a.rate != b.rate || a.bits != b.bits || a.bits is not (8 or 16)) throw new InvalidDataException();
+        var bytesPerSample = a.bits / 8; var maxSamples = Math.Max(a.data.Length, b.data.Length) / bytesPerSample;
+        var data = new byte[maxSamples * bytesPerSample];
+        var samplesA = a.data.Length / bytesPerSample; var samplesB = b.data.Length / bytesPerSample;
+        for (var i = 0; i < maxSamples; i++)
+        {
+            var ia = i % samplesA * bytesPerSample; var ib = i % samplesB * bytesPerSample;
+            if (a.bits == 16)
+            {
+                var value = BitConverter.ToInt16(a.data, ia) * officeGain + BitConverter.ToInt16(b.data, ib) * fanGain;
+                BitConverter.GetBytes((short)Math.Clamp((int)Math.Round(value), short.MinValue, short.MaxValue)).CopyTo(data, i * 2);
+            }
+            else
+            {
+                var value = 128 + (a.data[ia] - 128) * officeGain + (b.data[ib] - 128) * fanGain;
+                data[i] = (byte)Math.Clamp((int)Math.Round(value), 0, 255);
+            }
+        }
+        using var output = new MemoryStream(); using var writer = new BinaryWriter(output);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); writer.Write(36 + a.fmt.Length + data.Length); writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("fmt ")); writer.Write(a.fmt.Length); writer.Write(a.fmt);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("data")); writer.Write(data.Length); writer.Write(data);
+        if ((data.Length & 1) != 0) writer.Write((byte)0);
+        var result = output.ToArray(); BitConverter.GetBytes(result.Length - 8).CopyTo(result, 4); return result;
     }
 
     private static void StartLoop(string file, double gain)
