@@ -28,6 +28,8 @@ internal sealed class GameForm : Form
     private readonly Dictionary<string, Keys> _controlBindings = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RectangleF> _settingsBindingRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _nextAttack = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _animatronicCameras = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _animatronicRouteIndices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _pendingUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _resolved = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Keys> _cheatKeysHeld = [];
@@ -47,6 +49,7 @@ internal sealed class GameForm : Form
     private int _ventCooldown;
     private int _doorPower = 100;
     private int _doorPowerDrainCounter;
+    private int _doorPowerRechargeCounter;
     private int _payoutPaidDay;
     private int _lawsuitCheckedDay;
     private int _payoutForNight;
@@ -64,6 +67,8 @@ internal sealed class GameForm : Form
     private bool _lureSpent;
     private bool _ventScanned;
     private bool _monitorOpen;
+    private bool _cameraMonitorMode;
+    private string _selectedCamera = "1A";
     private string? _activeOfficeTaskId;
     private int _officeTaskSecondsRemaining;
     private string? _ventThreatSide;
@@ -147,19 +152,35 @@ internal sealed class GameForm : Form
     private string? _waitingForBindingAction;
     private string _settingsMessage = "Select a control, then press the key you want to bind.";
     private RectangleF _continueRect;
-    private RectangleF _retryRect;
     private RectangleF _monitorToggleRect;
     private readonly Dictionary<string, RectangleF> _officeTaskRects = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RectangleF> _officeMonitorTabRects = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RectangleF> _cameraSelectRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _completedOfficeTasks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly (string Id, string Name, int Seconds, bool Noisy)[] OfficeTasks =
     [
-        ("cups", "ORDER CUPS", 9, false), ("plates", "ORDER PLATES", 9, false),
-        ("napkins", "ORDER NAPKINS", 9, false), ("utensils", "ORDER UTENSILS", 9, false),
-        ("pizza-kits", "ORDER PIZZA KITS", 9, false), ("menus", "PRINT MENUS", 16, true),
-        ("posters", "PRINT POSTERS", 16, true), ("flyers", "PRINT FLYERS", 16, true),
-        ("bulbs", "REPLACE BULBS", 13, false), ("ovens", "CLEAN OVENS", 13, false),
-        ("toilets", "UNCLOG TOILETS", 13, false)
+        ("cups", "ORDER CUPS", 12, false), ("plates", "ORDER PLATES", 12, false),
+        ("napkins", "ORDER NAPKINS", 12, false), ("utensils", "ORDER UTENSILS", 12, false),
+        ("pizza-kits", "ORDER PIZZA KITS", 12, false), ("menus", "PRINT MENUS", 20, true),
+        ("posters", "PRINT POSTERS", 20, true), ("flyers", "PRINT FLYERS", 20, true),
+        ("bulbs", "REPLACE BULBS", 17, false), ("ovens", "CLEAN OVENS", 17, false),
+        ("toilets", "UNCLOG TOILETS", 17, false)
     ];
+    private static readonly (string Id, string Name)[] FnafCameras =
+    [
+        ("1A", "SHOW STAGE"), ("1B", "DINING AREA"), ("1C", "PIRATE COVE"),
+        ("2A", "WEST HALL"), ("2B", "WEST CORNER"), ("3", "SUPPLY CLOSET"),
+        ("4A", "EAST HALL"), ("4B", "EAST CORNER"), ("5", "BACKSTAGE"),
+        ("6", "KITCHEN"), ("7", "RESTROOMS")
+    ];
+    private static readonly Dictionary<string, string[]> AnimatronicRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["freddy"] = ["1A", "1B", "7", "6", "4A", "4B"],
+        ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
+        ["springtrap"] = ["1A", "5", "3", "2A", "2B"],
+        ["nightmare-chica"] = ["1A", "1B", "6", "2A", "2B"],
+        ["scrap-baby"] = ["1A", "5", "7", "V1"]
+    };
     private readonly Dictionary<string, RectangleF> _attractionBuyRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RectangleF> _catalogCategoryRects = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RectangleF> _nightActionRects = new(StringComparer.OrdinalIgnoreCase);
@@ -1329,7 +1350,7 @@ internal sealed class GameForm : Form
         DrawMeter(g, right.X + 22, right.Y + 169, right.Width - 44, "VENTILATION", _vent, 100, _vent > 25 ? _teal : _red);
         DrawMeter(g, right.X + 22, right.Y + 218, right.Width - 44, "DOOR POWER", _doorPower, 100, _doorPower > 25 ? _gold : _red);
         _monitorToggleRect = new RectangleF(right.X + 22, right.Y + 272, right.Width - 44, 37);
-        DrawButton(g, _monitorToggleRect, _monitorOpen ? "LOWER MONITOR · CANCEL TASK" : "RAISE MONITOR · OFFICE TASKS", "M", _gold, Color.FromArgb(29, 26, 18), true);
+        DrawButton(g, _monitorToggleRect, _monitorOpen ? "LOWER MONITOR · CANCEL TASK" : "RAISE MONITOR · TASKS / CAMERAS", "M", _gold, Color.FromArgb(29, 26, 18), true);
         DrawNightAction(g, right, "left-door", KeyLabel(_controlBindings["left-door"]), _leftDoorClosed ? "OPEN LEFT" : _doorPower > 0 ? "CLOSE LEFT" : "NO POWER", 0);
         DrawNightAction(g, right, "right-door", KeyLabel(_controlBindings["right-door"]), _rightDoorClosed ? "OPEN RIGHT" : _doorPower > 0 ? "CLOSE RIGHT" : "NO POWER", 1);
         DrawNightAction(g, right, "mask", KeyLabel(_controlBindings["mask"]), "PUT ON MASK", 2);
@@ -1374,46 +1395,121 @@ internal sealed class GameForm : Form
         if (intruderVisible) DrawOfficeIntruder(g, r, _officeIntruderId!);
         if (threat is null && !intruderVisible)
             DrawText(g, "NO MOVEMENT", _noMovementFont, Color.FromArgb(103, 136, 121), r.X + 260, r.Y + 222, 250, 28, StringAlignment.Center);
-        if (_monitorOpen) DrawOfficeMonitor(g, r);
         var bar = new RectangleF(r.X + 35, r.Bottom - 83, r.Width - 70, 7);
         using var track = new SolidBrush(Color.FromArgb(45, 56, 53)); g.FillRectangle(track, bar);
         using var progress = new SolidBrush(_teal); g.FillRectangle(progress, bar.X, bar.Y, Math.Max(0, bar.Width * _seconds / NightSteps), bar.Height);
         DrawText(g, "12:00 AM", _smallFont, _gold, r.X + 35, r.Bottom - 68);
         DrawText(g, "6:00 AM", _smallFont, _gold, r.Right - 98, r.Bottom - 68);
+        if (_monitorOpen) DrawOfficeMonitor(g, r);
     }
 
     private void DrawOfficeMonitor(Graphics g, RectangleF office)
     {
-        var panel = new RectangleF(office.X + 166, office.Y + 92, 444, 336);
-        using var casing = new SolidBrush(Color.FromArgb(242, 7, 10, 11));
-        using var edge = new Pen(Color.FromArgb(205, 165, 168, 145), 3);
-        g.FillRectangle(casing, panel); g.DrawRectangle(edge, panel.X, panel.Y, panel.Width, panel.Height);
-        DrawText(g, "FAZBEAR ENTERTAINMENT  /  TERMINAL", _smallFont, _gold, panel.X + 14, panel.Y + 12, panel.Width - 28, 18);
-        var completed = _completedOfficeTasks.Count;
-        DrawText(g, $"DAILY TASKS  {completed}/11", _bodyFont, _teal, panel.X + 14, panel.Y + 37, panel.Width - 28, 20);
-        DrawLine(g, _edge, 1, panel.X + 12, panel.Y + 62, panel.Right - 12, panel.Y + 62);
-        _officeTaskRects.Clear();
-        const float cardWidth = 198, cardHeight = 34, gapX = 12, gapY = 6;
-        for (var i = 0; i < OfficeTasks.Length; i++)
+        var panel = office;
+        using var casing = new SolidBrush(Color.FromArgb(255, 5, 7, 8));
+        using var edge = new Pen(Color.FromArgb(255, 165, 168, 145), 3);
+        g.FillRectangle(casing, panel); g.DrawRectangle(edge, panel.X + 1, panel.Y + 1, panel.Width - 2, panel.Height - 2);
+        DrawText(g, "FAZBEAR ENTERTAINMENT  /  TERMINAL", _smallFont, _gold, panel.X + 18, panel.Y + 12, 300, 18);
+        _officeMonitorTabRects.Clear();
+        var tabs = new[] { (Id: "tasks", Label: "DAILY TASKS"), (Id: "cameras", Label: "CAMERAS") };
+        for (var i = 0; i < tabs.Length; i++)
         {
-            var task = OfficeTasks[i];
-            var column = i % 2;
-            var row = i / 2;
-            var rect = new RectangleF(panel.X + 14 + column * (cardWidth + gapX), panel.Y + 73 + row * (cardHeight + gapY), cardWidth, cardHeight);
-            _officeTaskRects[task.Id] = rect;
-            var done = _completedOfficeTasks.Contains(task.Id);
-            var active = _activeOfficeTaskId == task.Id;
-            var fillColor = done ? Color.FromArgb(26, 49, 38) : active ? Color.FromArgb(52, 42, 20) : Color.FromArgb(19, 25, 25);
-            using var fill = new SolidBrush(fillColor);
-            using var border = new Pen(done ? _teal : active ? _gold : _edge, active ? 2 : 1);
-            g.FillRectangle(fill, rect); g.DrawRectangle(border, rect.X, rect.Y, rect.Width, rect.Height);
-            var label = done ? "✓  " + task.Name : active ? $"WORKING  {_officeTaskSecondsRemaining}s" : task.Name;
-            DrawText(g, label, _smallFont, done ? _teal : active ? _gold : _ink, rect.X + 8, rect.Y + 9, rect.Width - 16, 18);
+            var tab = new RectangleF(panel.Right - 258 + i * 122, panel.Y + 9, 116, 30);
+            _officeMonitorTabRects[tabs[i].Id] = tab;
+            var selected = _cameraMonitorMode == (tabs[i].Id == "cameras");
+            using var fill = new SolidBrush(selected ? Color.FromArgb(47, 35, 19) : Color.FromArgb(18, 23, 23));
+            using var border = new Pen(selected ? _gold : _edge);
+            g.FillRectangle(fill, tab); g.DrawRectangle(border, tab.X, tab.Y, tab.Width, tab.Height);
+            DrawText(g, tabs[i].Label, _smallFont, selected ? _gold : _muted, tab.X, tab.Y + 8, tab.Width, 18, StringAlignment.Center);
         }
-        if (_activeOfficeTaskId is not null)
-            DrawText(g, "TASK IN PROGRESS · WORK NOISE MAY DRAW THEM CLOSER", _smallFont, _gold, panel.X + 14, panel.Bottom - 20, panel.Width - 28, 15);
+        DrawLine(g, _edge, 1, panel.X + 14, panel.Y + 49, panel.Right - 14, panel.Y + 49);
+        _officeTaskRects.Clear();
+        _cameraSelectRects.Clear();
+        if (_cameraMonitorMode)
+        {
+            DrawCameraMonitor(g, panel);
+        }
         else
-            DrawText(g, "SELECT A TASK · ADVERTISING PRINTS ARE LOUD", _smallFont, _muted, panel.X + 14, panel.Bottom - 20, panel.Width - 28, 15);
+        {
+            DrawText(g, $"DAILY TASKS  {_completedOfficeTasks.Count}/11", _bodyFont, _teal, panel.X + 18, panel.Y + 60, panel.Width - 36, 20);
+            const float cardWidth = 352, cardHeight = 48, gapX = 18, gapY = 12;
+            for (var i = 0; i < OfficeTasks.Length; i++)
+            {
+                var task = OfficeTasks[i];
+                var column = i % 2;
+                var row = i / 2;
+                var rect = new RectangleF(panel.X + 18 + column * (cardWidth + gapX), panel.Y + 94 + row * (cardHeight + gapY), cardWidth, cardHeight);
+                _officeTaskRects[task.Id] = rect;
+                var done = _completedOfficeTasks.Contains(task.Id);
+                var active = _activeOfficeTaskId == task.Id;
+                var fillColor = done ? Color.FromArgb(26, 49, 38) : active ? Color.FromArgb(52, 42, 20) : Color.FromArgb(19, 25, 25);
+                using var fill = new SolidBrush(fillColor);
+                using var border = new Pen(done ? _teal : active ? _gold : _edge, active ? 2 : 1);
+                g.FillRectangle(fill, rect); g.DrawRectangle(border, rect.X, rect.Y, rect.Width, rect.Height);
+                var label = done ? "✓  " + task.Name : active ? $"WORKING  {_officeTaskSecondsRemaining}s" : task.Name;
+                DrawText(g, label, _smallFont, done ? _teal : active ? _gold : _ink, rect.X + 13, rect.Y + 15, rect.Width - 26, 18);
+            }
+            var footer = _activeOfficeTaskId is not null ? "TASK IN PROGRESS · PRINTER NOISE MAY DRAW THEM CLOSER" : "SELECT A TASK · ADVERTISING PRINTS ARE LOUD";
+            DrawText(g, footer, _smallFont, _activeOfficeTaskId is not null ? _gold : _muted, panel.X + 18, panel.Bottom - 29, panel.Width - 36, 16);
+        }
+    }
+
+    private void DrawCameraMonitor(Graphics g, RectangleF panel)
+    {
+        var feed = new RectangleF(panel.X + 18, panel.Y + 62, 474, panel.Height - 80);
+        using (var fill = new SolidBrush(Color.FromArgb(18, 25, 24))) g.FillRectangle(fill, feed);
+        using (var border = new Pen(_edge)) g.DrawRectangle(border, feed.X, feed.Y, feed.Width, feed.Height);
+        var camera = FnafCameras.FirstOrDefault(c => c.Id == _selectedCamera);
+        DrawText(g, $"CAM {camera.Id}  /  {camera.Name}", _smallFont, _gold, feed.X + 14, feed.Y + 12, feed.Width - 28, 18);
+        using (var room = new LinearGradientBrush(new RectangleF(feed.X + 12, feed.Y + 42, feed.Width - 24, 234), Color.FromArgb(31, 41, 39), Color.FromArgb(8, 12, 12), 90f))
+            g.FillRectangle(room, feed.X + 12, feed.Y + 42, feed.Width - 24, 234);
+        DrawLine(g, Color.FromArgb(85, 110, 103), 1, feed.X + 24, feed.Y + 204, feed.Right - 24, feed.Y + 204);
+        DrawLine(g, Color.FromArgb(85, 110, 103), 1, feed.X + 34, feed.Y + 258, feed.Right - 34, feed.Y + 258);
+        var occupants = _animatronicCameras.Where(x => x.Value == camera.Id)
+            .Select(x => _sheets.Animatronics.FirstOrDefault(a => a.Id == x.Key)).Where(a => a is not null).ToArray();
+        if (occupants.Length == 0) DrawText(g, "NO MOVEMENT", _bodyFont, _muted, feed.X + 28, feed.Y + 140, feed.Width - 56, 25, StringAlignment.Center);
+        else
+        {
+            var portraitWidth = Math.Min(112, (feed.Width - 40f) / occupants.Length);
+            for (var i = 0; i < occupants.Length; i++)
+            {
+                var portrait = new RectangleF(feed.X + 20 + i * (portraitWidth + 12), feed.Y + 66, portraitWidth, 132);
+                DrawPortraitFrame(g, occupants[i]!, portrait);
+                DrawText(g, occupants[i]!.Name.ToUpperInvariant(), _smallFont, _ink, portrait.X - 2, portrait.Bottom + 8, portrait.Width + 4, 28, StringAlignment.Center);
+            }
+        }
+        DrawText(g, "CAMERA MAP", _smallFont, _teal, feed.X + 12, feed.Bottom - 28, feed.Width - 24, 18);
+        DrawText(g, "AI-weighted movement checks: 3s Freddy / 5s others.", _smallFont, _muted, feed.X + 12, feed.Bottom - 14, feed.Width - 24, 16);
+
+        var map = new RectangleF(feed.Right + 12, feed.Y, panel.Right - feed.Right - 30, feed.Height);
+        using (var fill = new SolidBrush(Color.FromArgb(12, 17, 17))) g.FillRectangle(fill, map);
+        using (var border = new Pen(_edge)) g.DrawRectangle(border, map.X, map.Y, map.Width, map.Height);
+        var placements = new Dictionary<string, PointF>
+        {
+            ["1A"] = new(.5f, .08f), ["1B"] = new(.5f, .37f), ["1C"] = new(.14f, .1f),
+            ["2A"] = new(.12f, .48f), ["2B"] = new(.12f, .68f), ["3"] = new(.12f, .31f),
+            ["4A"] = new(.88f, .48f), ["4B"] = new(.88f, .68f), ["5"] = new(.5f, .22f),
+            ["6"] = new(.88f, .1f), ["7"] = new(.88f, .31f)
+        };
+        PointF CenterOf(string id) => new(map.X + map.Width * placements[id].X, map.Y + map.Height * placements[id].Y + 17);
+        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1B", "2A"), ("2A", "2B"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B") };
+        using (var corridor = new Pen(Color.FromArgb(85, 95, 83, 65), 3))
+            foreach (var (from, to) in links) g.DrawLine(corridor, CenterOf(from), CenterOf(to));
+        var nodeW = Math.Min(82, map.Width * .43f); const float nodeH = 35;
+        foreach (var (id, point) in placements)
+        {
+            var node = new RectangleF(map.X + map.Width * point.X - nodeW / 2, map.Y + map.Height * point.Y, nodeW, nodeH);
+            _cameraSelectRects[id] = node;
+            var selected = id == _selectedCamera;
+            var occupied = _animatronicCameras.Values.Contains(id, StringComparer.OrdinalIgnoreCase);
+            using var nodeFill = new SolidBrush(selected ? Color.FromArgb(53, 39, 21) : Color.FromArgb(24, 31, 30));
+            using var nodeEdge = new Pen(occupied ? _red : selected ? _gold : _edge, selected || occupied ? 2 : 1);
+            g.FillRectangle(nodeFill, node); g.DrawRectangle(nodeEdge, node.X, node.Y, node.Width, node.Height);
+            DrawText(g, $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 9, node.Width, 17, StringAlignment.Center);
+        }
+        var office = new RectangleF(map.X + map.Width * .28f, map.Bottom - 48, map.Width * .44f, 32);
+        using var officeFill = new SolidBrush(Color.FromArgb(61, 28, 26)); g.FillRectangle(officeFill, office);
+        DrawText(g, "OFFICE", _smallFont, _red, office.X, office.Y + 8, office.Width, 17, StringAlignment.Center);
     }
 
     private void DrawOfficeIntruder(Graphics g, RectangleF office, string id)
@@ -1482,7 +1578,7 @@ internal sealed class GameForm : Form
 
     private void DrawDoorWarning(Graphics g, RectangleF office, string side)
     {
-        var threatPending = _sheets.Animatronics.Any(a => a.DoorSide == side && _pendingUntil.TryGetValue(a.Id, out var until) && until > _seconds && !_resolved.Contains(a.Id));
+        var threatPending = _sheets.Animatronics.Any(a => DoorSideFor(a) == side && _pendingUntil.TryGetValue(a.Id, out var until) && until > _seconds && !_resolved.Contains(a.Id));
         if (!threatPending) return;
         var centerX = side == "left" ? office.X + 150 : office.Right - 150;
         var y = office.Y + 46;
@@ -1550,24 +1646,9 @@ internal sealed class GameForm : Form
         var lawsuitMessage = _lawsuitsThisShift == 0 ? "No lawsuits filed this day." : $"{_lawsuitsThisShift} LAWSUIT{(_lawsuitsThisShift == 1 ? "" : "S")}  ·  SETTLED FOR ${_lawsuitFeesThisShift:N0}";
         DrawText(g, lawsuitMessage, _smallFont, _lawsuitsThisShift > 0 ? _red : _teal, 0, 310, DesignWidth, 20, StringAlignment.Center);
         DrawText(g, $"NIGHT SCORE   {_score:N0}     ·     STRIKES   {_strikes}/3     ·     THREATS   {ActiveThreatCount()}", _smallFont, _gold, 0, 339, DesignWidth, 24, StringAlignment.Center);
-        _retryRect = new RectangleF(304, 410, 292, 49);
-        DrawButton(g, _retryRect, "REWORK THE LINEUP", "↻", _ink, Color.FromArgb(22, 31, 30), true);
-        _continueRect = new RectangleF(620, 410, 356, 49);
+        _continueRect = new RectangleF(430, 410, 420, 49);
         DrawButton(g, _continueRect, _dayResetByDeath ? "REOPEN THE DAY" : _nightWon ? "OPEN FOR THE NEXT DAY" : "TRY THE SHIFT AGAIN", "→", _gold, Color.FromArgb(47, 35, 19), true);
         DrawText(g, "ESC  QUIT", _smallFont, Color.FromArgb(106, 115, 110), 48, 694);
-    }
-
-    private void ReturnToRosterAfterNight()
-    {
-        _timer.Stop();
-        _nightStarted = false;
-        _nightOver = false;
-        _showRatingGuide = false;
-        _prepScreen = PrepScreen.Roster;
-        _dayResetByDeath = false;
-        _rosterHoveredAnimatronic = null;
-        SaveActiveSlot();
-        Invalidate();
     }
 
     private void ContinueAfterNight()
@@ -1587,10 +1668,7 @@ internal sealed class GameForm : Form
     private bool HandleResultButton(PointF point)
     {
         if (!_nightStarted || !_nightOver) return false;
-        // Use the same fixed hitboxes as DrawResult so the actions don't depend on
-        // paint timing or other hover/modal rectangles from the prep screens.
-        if (new RectangleF(304, 410, 292, 49).Contains(point)) ReturnToRosterAfterNight();
-        else if (new RectangleF(620, 410, 356, 49).Contains(point)) ContinueAfterNight();
+        if (new RectangleF(430, 410, 420, 49).Contains(point)) ContinueAfterNight();
         else return false;
         return true;
     }
@@ -1691,13 +1769,18 @@ internal sealed class GameForm : Form
         _payoutCollectedThisNight = 0;
         _payoutAiBonusCollected = 0;
         _dayResetByDeath = false;
-        _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
-        _monitorOpen = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
+        _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _doorPowerRechargeCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
+        _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
             ? "No animatronics tonight. Raise the terminal monitor and finish all 11 office tasks."
             : $"Raise the terminal monitor and finish all 11 tasks. Survival earns ${_payoutForNight:N0}; loud printing can draw threats in.";
-        _pendingUntil.Clear(); _nextAttack.Clear(); _resolved.Clear();
-        foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0)) _nextAttack[a.Id] = Math.Max(5, a.FirstAttackSeconds - _ai[a.Id] / 2);
+        _pendingUntil.Clear(); _nextAttack.Clear(); _resolved.Clear(); _animatronicCameras.Clear(); _animatronicRouteIndices.Clear();
+        foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
+        {
+            _animatronicCameras[a.Id] = "1A";
+            _animatronicRouteIndices[a.Id] = 0;
+            _nextAttack[a.Id] = Math.Max(5, a.FirstAttackSeconds - _ai[a.Id] / 2);
+        }
         _timer.Start(); SaveActiveSlot(); Invalidate();
     }
 
@@ -1735,7 +1818,16 @@ internal sealed class GameForm : Form
                 _message = "Door power depleted. Both doors opened.";
             }
         }
-        else { _doorPowerDrainCounter = 0; _doorPower = Math.Min(100, _doorPower + 3); }
+        else
+        {
+            _doorPowerDrainCounter = 0;
+            if (++_doorPowerRechargeCounter >= 3)
+            {
+                _doorPower = Math.Min(100, _doorPower + 3);
+                _doorPowerRechargeCounter = 0;
+            }
+        }
+        if (closedDoorCount > 0) _doorPowerRechargeCounter = 0;
         if (_ventCooldown > 0) _ventCooldown--;
         if (_seconds % 4 == 0)
         {
@@ -1746,15 +1838,28 @@ internal sealed class GameForm : Form
         {
             if (_nextAttack.TryGetValue(a.Id, out var due) && due <= _seconds && !_pendingUntil.ContainsKey(a.Id))
             {
-                _pendingUntil[a.Id] = _seconds + _random.Next(3, 7);
-                _resolved.Remove(a.Id);
-                _message = WarningFor(a);
-                if (a.Action == "scan") _ventThreatSide = _random.Next(0, 2) == 0 ? "left" : "right";
-                _nextAttack[a.Id] = _seconds + Math.Max(12, 52 - _ai[a.Id] * 2) + _random.Next(0, 9);
+                var route = RouteFor(a.Id);
+                // FNaF 1 uses movement opportunities: each check is an AI/20 roll.
+                // The camera monitor pauses movement for threats visible on the feed.
+                var cameraPaused = _cameraMonitorMode && _monitorOpen && a.Id.Equals("freddy", StringComparison.OrdinalIgnoreCase);
+                if (!cameraPaused && _random.Next(1, 21) <= _ai[a.Id])
+                {
+                    var routeIndex = Math.Min(route.Length - 1, _animatronicRouteIndices.GetValueOrDefault(a.Id) + 1);
+                    _animatronicRouteIndices[a.Id] = routeIndex;
+                    _animatronicCameras[a.Id] = route[routeIndex];
+                    if (routeIndex == route.Length - 1)
+                    {
+                        _pendingUntil[a.Id] = _seconds + _random.Next(3, 7);
+                        _resolved.Remove(a.Id);
+                        _message = WarningFor(a);
+                        if (a.Action == "scan") _ventThreatSide = route[^1] == "V1" ? "left" : "right";
+                    }
+                }
+                _nextAttack[a.Id] = _seconds + MovementOpportunityInterval(a.Id);
             }
             if (_pendingUntil.TryGetValue(a.Id, out var until) && until <= _seconds && !_resolved.Contains(a.Id))
             {
-                if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} moved away"; _message = _lastResolved + ". Stay alert."; }
+                if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} moved away"; _message = _lastResolved + ". Stay alert."; _animatronicRouteIndices[a.Id] = Math.Max(0, _animatronicRouteIndices.GetValueOrDefault(a.Id) - 2); _animatronicCameras[a.Id] = RouteFor(a.Id)[_animatronicRouteIndices[a.Id]]; }
                 else { _strikes++; _officeIntruderId = a.Id; _officeIntruderUntilUtc = DateTime.UtcNow.AddMilliseconds(1900); _lastResolved = $"{a.Name} entered the office"; _message = $"{_lastResolved}. Strike {_strikes} of 3."; }
                 _resolved.Add(a.Id); _pendingUntil.Remove(a.Id); _listening = false; _ventScanned = false;
                 if (a.Action == "scan") _ventThreatSide = null;
@@ -1768,6 +1873,7 @@ internal sealed class GameForm : Form
     private void ToggleOfficeMonitor()
     {
         _monitorOpen = !_monitorOpen;
+        if (_monitorOpen) { _cameraMonitorMode = false; _selectedCamera = "1A"; }
         if (!_monitorOpen && _activeOfficeTaskId is not null)
         {
             _activeOfficeTaskId = null;
@@ -1777,6 +1883,19 @@ internal sealed class GameForm : Form
         else _message = _monitorOpen ? "Terminal online. Select a task to begin." : "Monitor lowered.";
         Invalidate();
     }
+
+    private static string[] RouteFor(string id) => AnimatronicRoutes.TryGetValue(id, out var route)
+        ? route
+        : ["1A", "1B", "4A", "4B"];
+
+    private static int MovementOpportunityInterval(string id) => id.Equals("freddy", StringComparison.OrdinalIgnoreCase) ? 3 : 5;
+
+    private static string? DoorSideFor(Animatronic a) => a.DoorSide ?? (RouteFor(a.Id)[^1] switch
+    {
+        "2B" => "left",
+        "4B" => "right",
+        _ => null
+    });
 
     private void StartOfficeTask(string taskId)
     {
@@ -2131,6 +2250,20 @@ internal sealed class GameForm : Form
             if (_monitorToggleRect.Contains(p)) { ToggleOfficeMonitor(); return; }
             if (_monitorOpen)
             {
+                foreach (var (tabId, rect) in _officeMonitorTabRects)
+                {
+                    if (!rect.Contains(p)) continue;
+                    _cameraMonitorMode = tabId == "cameras";
+                    Invalidate();
+                    return;
+                }
+                foreach (var (cameraId, rect) in _cameraSelectRects)
+                {
+                    if (!rect.Contains(p)) continue;
+                    _selectedCamera = cameraId;
+                    Invalidate();
+                    return;
+                }
                 foreach (var (taskId, rect) in _officeTaskRects)
                     if (rect.Contains(p)) { StartOfficeTask(taskId); return; }
             }
@@ -2319,7 +2452,6 @@ internal sealed class GameForm : Form
         if (_nightStarted && _nightOver)
         {
             if (e.KeyCode is Keys.Enter or Keys.Space) ContinueAfterNight();
-            else if (e.KeyCode is Keys.R or Keys.Tab) ReturnToRosterAfterNight();
             else return;
             e.Handled = true;
             e.SuppressKeyPress = true;
