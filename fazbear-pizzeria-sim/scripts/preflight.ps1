@@ -33,7 +33,7 @@ foreach($s in $systems.systems) {
   if($s.fields.Count -eq 0) { $errors.Add("systems.$($s.id): no property columns") }
 }
 if($games.games.Count -ne 6) { $errors.Add('Expected six game source rows.') }
-if($anim.animatronics.Count -ne 5) { $errors.Add('The test roster must have one sample from each game except UCN, which supplies night settings.') }
+if($anim.animatronics.Count -ne 6) { $errors.Add('The test roster must have one sample from each game, Bonnie, and UCN night settings.') }
 if($anim.defaultAiLevel -lt 0 -or $anim.defaultAiLevel -gt $anim.maximumAiLevel) { $errors.Add('Invalid default AI level bounds.') }
 if($anim.startingFunds -ne 200) { $errors.Add('The agreed starting budget must be $200.') }
 if('freddy' -notin @($anim.animatronics | ForEach-Object id)) { $errors.Add('The starter Freddy animatronic must remain in the roster.') }
@@ -58,5 +58,13 @@ if(Test-Path -LiteralPath (Join-Path $root 'assets\attractions')) {
   New-Item -ItemType Directory -Force -Path $publishAttractions | Out-Null
   Copy-Item -Path (Join-Path $root 'assets\attractions\*.png') -Destination $publishAttractions -Force
 }
+if(Test-Path -LiteralPath (Join-Path $root 'sound-bank')) {
+  $publishSounds = Join-Path $root 'build\sound-bank'
+  New-Item -ItemType Directory -Force -Path $publishSounds | Out-Null
+  Copy-Item -Path (Join-Path $root 'sound-bank\*.wav') -Destination $publishSounds -Force
+  foreach($requiredSound in @('CAMERA_VIDEO_LOA_60105303.wav','blip3.wav','main menu theme.wav','office ambience2.wav','on a cam.wav','put down monitor.wav','door closing.wav','door lights on sound.wav','animatronic moving from a cam.wav','animatronic spotted at the lights.wav','fnaf one jumpscare.wav','fnaf one golden freddy jumpscare.wav','when hitting 6 am (plays beffore the winning a night one).wav','winning a night.wav','Buzz_Fan_Florescent2 (plays at a low sound in the office).wav')) {
+    if(-not (Test-Path -LiteralPath (Join-Path $publishSounds $requiredSound))) { throw "Published sound missing: $requiredSound" }
+  }
+}
 foreach($a in $attractions.attractions) { if(-not (Test-Path -LiteralPath (Join-Path $root "build\assets\attractions\$($a.id).png"))) { throw "Published catalog picture missing: $($a.id).png" } }
-Write-Host 'Published app, data sheets, portraits, and available attraction art to build/.'
+Write-Host 'Published app, data sheets, portraits, attraction art, and sound bank to build/.'
