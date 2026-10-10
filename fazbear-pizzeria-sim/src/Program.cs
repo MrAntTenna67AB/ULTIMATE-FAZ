@@ -236,13 +236,15 @@ internal sealed class MainForm : Form
         header.BringToFront(); _footer.BringToFront();
     }
 
+    private int LinkedSourceCount() => _sources.Values.Count(s => s.Game.Id != "fnaf-mades" && s.IsAvailable);
+
     private void ShowDay()
     {
         _mode = 0; _timer.Stop();
         ClearBody();
         _headline.Text = $"DAY {_day}  /  THE PIZZERIA";
         _subtitle.Text = "BUILD THE STAGE   •   CHOOSE TONIGHT'S ROSTER   •   WATCH THE COSTS";
-        _status.Text = $"FUNDS  ${_money:N0}     OWNED  {_owned.Count}/{_sheets.Animatronics.Count}     SOURCES LINKED  {_sources.Values.Count(s => s.IsAvailable)}/6";
+        _status.Text = $"FUNDS  ${_money:N0}     OWNED  {_owned.Count}/{_sheets.Animatronics.Count}     SOURCES LINKED  {LinkedSourceCount()}/6";
         var intro = new Label { Dock = DockStyle.Top, Height = 60, Text = "Lay out the roster for opening night. Every animatronic you buy can show up in the office. Set its UCN-style AI level before the shift.", ForeColor = Muted, Font = new Font("Segoe UI", 11), Padding = new Padding(3, 0, 3, 12) };
         _body.Controls.Add(intro);
         var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Color.Transparent };

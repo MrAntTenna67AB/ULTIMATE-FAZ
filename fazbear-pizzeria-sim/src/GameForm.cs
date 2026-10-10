@@ -107,6 +107,7 @@ internal sealed class GameForm : Form
     private bool _nightOver;
     private bool _nightWon;
     private bool _nightStarted;
+    private bool _nightPaused;
     private bool _dayResetByDeath;
     private bool _jumpscareActive;
     private string? _officeIntruderId;
@@ -236,6 +237,7 @@ internal sealed class GameForm : Form
         ["chica"] = ["1A", "1B", "7", "4A", "4B"],
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
         ["toy-freddy"] = ["1A", "10", "2A", "2B"],
+        ["toy-chica"] = ["1A", "5", "1B", "2A", "2B"],
         ["puppet"] = ["1A"],
         ["springtrap"] = ["1A", "5", "3", "2A", "2B"],
         ["nightmare-chica"] = ["1A", "1B", "6", "2A", "2B"],
@@ -390,7 +392,7 @@ internal sealed class GameForm : Form
         else if (_jumpscareActive) DrawJumpscare(g);
         else if (_tennaQuizActive) DrawTennaQuiz(g);
         else if (_nightStarted && _nightOver) DrawResult(g);
-        else if (_nightStarted) DrawNight(g);
+        else if (_nightStarted) { DrawNight(g); if (_nightPaused) DrawPauseOverlay(g); }
         else DrawPizzeria(g);
         DrawCheatToast(g);
         if (_pendingPurchaseKind != PurchaseKind.None) DrawPurchaseConfirmation(g);
@@ -702,6 +704,7 @@ internal sealed class GameForm : Form
         foreach (var animatronic in _sheets.Animatronics) _ai[animatronic.Id] = _sheets.DefaultAiLevel;
         _nightStarted = false;
         _nightOver = false;
+        _nightPaused = false;
         _nightWon = false;
         _seconds = 0;
         _strikes = 0;
@@ -756,10 +759,14 @@ internal sealed class GameForm : Form
         _unlockedAnimatronicGames.Clear();
         _unlockedAnimatronicGames.Add("fnaf1");
         var savedCategoryIds = (data.UnlockedAnimatronicGames ?? []).Where(id => _sheets.Games.Any(game => game.Id == id));
-        _unlockedAnimatronicGames.UnionWith(savedCategoryIds.Where(id => !(id == "ucn" && data.Version < 2)));
+        // UCN became a paid category in save version 3. Older saves may contain it
+        // because the category-unlock cheat used to unlock every category.
+        _unlockedAnimatronicGames.UnionWith(savedCategoryIds.Where(id => !(id.Equals("ucn", StringComparison.OrdinalIgnoreCase) && data.Version < 3)));
         _purchasedCatalogCategories.Clear(); _purchasedCatalogCategories.Add("dumpster");
         _purchasedCatalogCategories.UnionWith((data.PurchasedCatalogCategories ?? []).Where(CatalogCategoryIds.Contains));
         _dayStartSnapshot = data.DayStartState;
+        if (data.Version < 3 && _dayStartSnapshot is { } oldSnapshot)
+            _dayStartSnapshot = oldSnapshot with { UnlockedAnimatronicGames = oldSnapshot.UnlockedAnimatronicGames.Where(id => !id.Equals("ucn", StringComparison.OrdinalIgnoreCase)).ToArray() };
         _prepScreen = Enum.IsDefined(typeof(PrepScreen), data.PrepScreen) ? (PrepScreen)data.PrepScreen : PrepScreen.Builder;
         _nightOver = data.NightOver;
         _nightWon = data.NightWon;
@@ -784,7 +791,7 @@ internal sealed class GameForm : Form
             Directory.CreateDirectory(directory);
             var path = SaveSlotPath(_activeSaveSlot);
             var temporary = path + ".tmp";
-            var data = new SaveGameData(2, DateTime.UtcNow, _day, _funds,
+            var data = new SaveGameData(3, DateTime.UtcNow, _day, _funds,
                 _owned.Order(StringComparer.OrdinalIgnoreCase).ToArray(), _stageAnimatronics.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
                 _builtAttractions.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
                 _placedAttractions.ToDictionary(pair => pair.Key, pair => pair.Value.Y * 8 + pair.Value.X, StringComparer.OrdinalIgnoreCase),
@@ -981,7 +988,7 @@ internal sealed class GameForm : Form
         var stage = new RectangleF(floor.X + 52, floor.Y + 42, 596, 42);
         using (var stageFill = new SolidBrush(Color.FromArgb(128, 25, 31))) g.FillRectangle(stageFill, stage);
         using (var stageEdge = new Pen(Color.FromArgb(238, 189, 59), 2)) g.DrawRectangle(stageEdge, stage.X, stage.Y, stage.Width, stage.Height);
-        var stageCrew = _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id)).ToArray();
+        var stageCrew = _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && IsAnimatronicSourceAvailable(a)).ToArray();
         _stageAnimatronicRects.Clear();
         if (stageCrew.Length == 0) DrawText(g, "EMPTY SHOW STAGE", _smallFont, _gold, stage.X, stage.Y + 12, stage.Width, 20, StringAlignment.Center);
         else
@@ -1116,7 +1123,7 @@ internal sealed class GameForm : Form
     private (int Atmosphere, int HealthSafety, int Entertainment, int BonusRevenue, int LiabilityRisk) PizzeriaRating()
     {
         var placed = _sheets.Attractions.Where(IsAttractionEffectivelyPlaced).ToArray();
-        var performers = _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id)).ToArray();
+        var performers = _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && IsAnimatronicSourceAvailable(a)).ToArray();
         return (
             placed.Sum(a => a.Atmosphere) + performers.Sum(a => a.Atmosphere),
             placed.Sum(a => a.HealthSafety) + performers.Sum(a => a.HealthSafety),
@@ -1129,6 +1136,14 @@ internal sealed class GameForm : Form
 
     private int AnimatronicCategoryCost(string gameId) =>
         _sheets.Games.FirstOrDefault(game => game.Id.Equals(gameId, StringComparison.OrdinalIgnoreCase))?.AnimatronicUnlockCost ?? int.MaxValue;
+
+    private bool IsAnimatronicSourceAvailable(Animatronic a) => _sources.TryGetValue(a.GameId, out var source) && source.IsAvailable;
+
+    private bool IsAnimatronicSourceAvailable(string id)
+    {
+        var animatronic = _sheets.Animatronics.FirstOrDefault(a => a.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        return animatronic is not null && IsAnimatronicSourceAvailable(animatronic);
+    }
 
     private bool IsCatalogCategoryUnlocked(string category, int? points = null) => _purchasedCatalogCategories.Contains(category);
 
@@ -1277,7 +1292,7 @@ internal sealed class GameForm : Form
         var fullHeight = 0;
         foreach (var game in _sheets.Games)
         {
-            var rowHeight = _unlockedAnimatronicGames.Contains(game.Id) ? cardH + cardTopGap : 76;
+            var rowHeight = _sources[game.Id].IsAvailable && _unlockedAnimatronicGames.Contains(game.Id) ? cardH + cardTopGap : 76;
             fullHeight += (int)(headerH + groupGap + (_collapsedRosterGroups.Contains(game.Id) ? 0 : rowHeight) + groupGap);
         }
         _rosterContentHeight = fullHeight;
@@ -1300,11 +1315,20 @@ internal sealed class GameForm : Form
             DrawPanel(g, header, collapsed ? Color.FromArgb(23, 18, 25) : Color.FromArgb(42, 27, 43));
             DrawText(g, collapsed ? "+" : "−", _panelTitleFont, _gold, header.X + 10, header.Y + 3, 18, 21, StringAlignment.Center);
             DrawText(g, ShortName(game.Name), _smallFont, _ink, header.X + 38, header.Y + 6, 185, 18);
-            var categoryStatus = categoryUnlocked ? $"CATEGORY OPEN · {boughtCount} OWNED" : $"LOCKED · UNLOCK ${categoryCost:N0}";
-            DrawText(g, categoryStatus, _smallFont, categoryUnlocked ? _teal : _gold, header.X + 250, header.Y + 6, 380, 18);
+            var categoryStatus = !source.IsAvailable ? "SOURCE GAME REQUIRED" : categoryUnlocked ? $"CATEGORY OPEN · {boughtCount} OWNED" : $"LOCKED · UNLOCK ${categoryCost:N0}";
+            DrawText(g, categoryStatus, _smallFont, source.IsAvailable ? categoryUnlocked ? _teal : _gold : Color.FromArgb(210, 125, 105), header.X + 250, header.Y + 6, 380, 18);
             DrawText(g, "12 PORTRAIT SLOTS", _smallFont, _muted, header.Right - 195, header.Y + 6, 180, 18, StringAlignment.Far);
             y += headerH + groupGap;
             if (collapsed) { y += groupGap; continue; }
+
+            if (!source.IsAvailable)
+            {
+                var lockedPanel = new RectangleF(_rosterViewportRect.X + 19, y, 1095, 66);
+                DrawPanel(g, lockedPanel, Color.FromArgb(20, 17, 23));
+                DrawText(g, "download the corresponding game to unlock its animatronics", _smallFont, Color.FromArgb(210, 125, 105), lockedPanel.X + 14, lockedPanel.Y + 23, lockedPanel.Width - 28, 20, StringAlignment.Center);
+                y += 76;
+                continue;
+            }
 
             if (!categoryUnlocked)
             {
@@ -1406,7 +1430,7 @@ internal sealed class GameForm : Form
         }
         else
         {
-            var linked = _sources.Values.Count(s => s.IsAvailable);
+            var linked = _sources.Values.Count(s => s.Game.Id != "fnaf-mades" && s.IsAvailable);
             if (_prepScreen == PrepScreen.Roster)
             {
                 var rating = PizzeriaRating();
@@ -1460,7 +1484,7 @@ internal sealed class GameForm : Form
         if (_pendingPurchaseKind == PurchaseKind.Animatronic && _pendingPurchaseId is not null)
         {
             var item = _sheets.Animatronics.FirstOrDefault(a => a.Id == _pendingPurchaseId);
-            if (item is not null && !_owned.Contains(item.Id) && _unlockedAnimatronicGames.Contains(item.GameId) && _funds >= item.Cost)
+            if (item is not null && IsAnimatronicSourceAvailable(item) && !_owned.Contains(item.Id) && _unlockedAnimatronicGames.Contains(item.GameId) && _funds >= item.Cost)
             {
                 _funds -= item.Cost;
                 _owned.Add(item.Id);
@@ -1486,7 +1510,7 @@ internal sealed class GameForm : Form
         {
             var gameId = _pendingPurchaseId;
             var cost = AnimatronicCategoryCost(gameId);
-            if (!_unlockedAnimatronicGames.Contains(gameId) && _funds >= cost)
+            if (_sources.TryGetValue(gameId, out var source) && source.IsAvailable && !_unlockedAnimatronicGames.Contains(gameId) && _funds >= cost)
             {
                 _funds -= cost;
                 _unlockedAnimatronicGames.Add(gameId);
@@ -1525,7 +1549,7 @@ internal sealed class GameForm : Form
         DrawPanel(g, r, active ? Color.FromArgb(20, 29, 29) : _panel);
         DrawPortraitFrame(g, a, new RectangleF(r.X + 18, r.Y + 20, 72, 72));
         DrawText(g, ShortName(source.Game.Name).ToUpperInvariant(), _smallFont, _teal, r.X + 108, r.Y + 22);
-        DrawText(g, source.IsAvailable ? "SOURCE CONNECTED" : "GAME COPY NOT FOUND", _smallFont, source.IsAvailable ? Color.FromArgb(123, 186, 143) : Color.FromArgb(210, 125, 105), r.X + 108, r.Y + 40);
+        DrawText(g, source.IsAvailable ? "SOURCE CONNECTED" : "download the corresponding game to unlock its animatronics", _smallFont, source.IsAvailable ? Color.FromArgb(123, 186, 143) : Color.FromArgb(210, 125, 105), r.X + 108, r.Y + 40, r.Width - 125, 42);
         DrawText(g, a.Name, _cardTitleFont, _ink, r.X + 108, r.Y + 58, r.Width - 126, 28);
         DrawText(g, a.Rule, _bodyFont, _muted, r.X + 20, r.Y + 107, r.Width - 40, 25);
         var action = new RectangleF(r.X + 18, r.Bottom - 48, r.Width - 36, 31);
@@ -1537,6 +1561,7 @@ internal sealed class GameForm : Form
         else
         {
             DrawText(g, active ? "AI LEVEL" : "SLEEPING", _smallFont, active ? _gold : _muted, r.X + 20, r.Bottom - 41);
+            if (!source.IsAvailable) return;
             var stageToggle = new RectangleF(r.X + 98, r.Bottom - 48, 148, 31);
             DrawStageToggleButton(g, stageToggle, _stageAnimatronics.Contains(a.Id));
             var minus = new RectangleF(r.Right - 114, r.Bottom - 48, 30, 30);
@@ -1572,6 +1597,18 @@ internal sealed class GameForm : Form
         DrawNightAction(g, right, "vent", KeyLabel(_controlBindings["vent"]), "RESET VENTS", 6);
         DrawText(g, "FOLLOW THE WARNING. 3 MISSES = GAME OVER.", _smallFont, _muted, right.X + 22, right.Bottom - 34, right.Width - 42);
         DrawText(g, "ESC  RETURN TO PREP", _smallFont, Color.FromArgb(106, 115, 110), 48, 694);
+    }
+
+    private void DrawPauseOverlay(Graphics g)
+    {
+        using var shade = new SolidBrush(Color.FromArgb(190, 0, 0, 0));
+        g.FillRectangle(shade, 0, 88, DesignWidth, 592);
+        var panel = new RectangleF(330, 286, 620, 122);
+        DrawPanel(g, panel, Color.FromArgb(22, 17, 23));
+        using var border = new Pen(_gold, 2);
+        g.DrawRectangle(border, panel.X, panel.Y, panel.Width, panel.Height);
+        DrawText(g, "GAME PAUSED", _titleFont, _gold, panel.X + 24, panel.Y + 22, panel.Width - 48, 44, StringAlignment.Center);
+        DrawText(g, "PRESS P TO RESUME", _smallFont, _ink, panel.X + 24, panel.Y + 77, panel.Width - 48, 20, StringAlignment.Center);
     }
 
     private void DrawOffice(Graphics g, RectangleF r)
@@ -1709,7 +1746,7 @@ internal sealed class GameForm : Form
             if (occupants.Length > visibleCount) DrawText(g, $"+{occupants.Length - visibleCount} MORE ON THIS CAMERA", _smallFont, _gold, room.X, room.Bottom - 20, room.Width, 18, StringAlignment.Center);
         }
         DrawText(g, "LIVE CAMERA FEED · ANIMATRONIC PORTRAITS", _smallFont, _teal, feed.X + 12, room.Bottom + 17, feed.Width - 24, 18);
-        if (_stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
+        if (IsAnimatronicSourceAvailable("puppet") && _stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
         {
             var boxLabel = _puppetEscaped ? "MUSIC BOX EMPTY · PUPPET LOOSE" : $"MUSIC BOX  {_puppetMusicBox}%";
             DrawText(g, boxLabel, _smallFont, _puppetEscaped ? _red : _gold, feed.X + 12, feed.Bottom - 77, feed.Width - 24, 18, StringAlignment.Center);
@@ -2073,16 +2110,16 @@ internal sealed class GameForm : Form
         _payoutAnimatronicBonusCollected = 0;
         _dayResetByDeath = false;
         _tennaQuizActive = false; _tennaFailedAnswers = 0; _tennaQuestionOrder = []; _tennaShuffledAnswers = []; _tennaQuizCooldownUntil = 0;
-        _tennaFirstEncounterPending = _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0;
+        _tennaFirstEncounterPending = IsAnimatronicSourceAvailable("mr-ant-tenna") && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0;
         _tennaHijackCountdown = -1;
         _goldenFreddyReady = false; _goldenFreddyEncounterTriggered = false;
-        _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
+        _nightStarted = true; _nightOver = false; _nightPaused = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
             ? "No animatronics tonight. Raise the terminal monitor and finish all 11 office tasks."
             : $"Raise the terminal monitor and finish all 11 tasks. Survival earns ${_payoutForNight:N0}; loud printing can draw threats in.";
         _pendingUntil.Clear(); _nextAttack.Clear(); _resolved.Clear(); _animatronicCameras.Clear(); _animatronicRouteIndices.Clear();
-        foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
+        foreach (var a in _sheets.Animatronics.Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
             if (a.Action == "puppet") continue;
             _animatronicCameras[a.Id] = RouteFor(a.Id)[0];
@@ -2094,9 +2131,26 @@ internal sealed class GameForm : Form
         _timer.Start(); SaveActiveSlot(); Invalidate();
     }
 
+    private void ToggleNightPause()
+    {
+        if (!_nightStarted || _nightOver || _jumpscareActive) return;
+        _nightPaused = !_nightPaused;
+        if (_nightPaused)
+        {
+            _timer.Stop();
+            NightSounds.StopAmbience();
+        }
+        else
+        {
+            NightSounds.StartAmbience();
+            _timer.Start();
+        }
+        Invalidate();
+    }
+
     private void AdvanceNight()
     {
-        if (!_nightStarted || _nightOver) return;
+        if (!_nightStarted || _nightOver || _nightPaused) return;
         if (_tennaQuizActive)
         {
             if (--_tennaSecondsRemaining <= 0) SubmitTennaAnswer(null);
@@ -2156,7 +2210,7 @@ internal sealed class GameForm : Form
                 NightSounds.Play("powerdown");
             }
         }
-        if (_monitorOpen && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0 &&
+        if (_monitorOpen && IsAnimatronicSourceAvailable("mr-ant-tenna") && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0 &&
             (_tennaHijackCountdown >= 0 || (_seconds >= _tennaQuizCooldownUntil && _random.Next(60) == 0)))
         {
             if (_tennaHijackCountdown > 0) _tennaHijackCountdown--;
@@ -2168,7 +2222,7 @@ internal sealed class GameForm : Form
                 return;
             }
         }
-        if (_stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
+        if (IsAnimatronicSourceAvailable("puppet") && _stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
         {
             if (!_puppetEscaped)
             {
@@ -2190,10 +2244,10 @@ internal sealed class GameForm : Form
         if (_ventCooldown > 0) _ventCooldown--;
         if (_seconds % 4 == 0)
         {
-            var ventThreatActive = (_stageAnimatronics.Contains("springtrap") && _ai["springtrap"] > 0) || (_stageAnimatronics.Contains("scrap-baby") && _ai["scrap-baby"] > 0);
+            var ventThreatActive = (IsAnimatronicSourceAvailable("springtrap") && _stageAnimatronics.Contains("springtrap") && _ai["springtrap"] > 0) || (IsAnimatronicSourceAvailable("scrap-baby") && _stageAnimatronics.Contains("scrap-baby") && _ai["scrap-baby"] > 0);
             if (ventThreatActive) _vent = Math.Max(0, _vent - 1);
         }
-        foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
+        foreach (var a in _sheets.Animatronics.Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
             if (a.Action == "puppet") continue;
             if (_nextAttack.TryGetValue(a.Id, out var due) && due <= _seconds && !_pendingUntil.ContainsKey(a.Id))
@@ -2204,9 +2258,8 @@ internal sealed class GameForm : Form
                 var cameraPaused = _cameraMonitorMode && _monitorOpen && (a.Id.Equals("freddy", StringComparison.OrdinalIgnoreCase) || a.Id.Equals("foxy", StringComparison.OrdinalIgnoreCase));
                 if (!cameraPaused && _random.Next(1, 21) <= _ai[a.Id])
                 {
-                    var routeIndex = Math.Min(route.Length - 1, _animatronicRouteIndices.GetValueOrDefault(a.Id) + 1);
-                    _animatronicRouteIndices[a.Id] = routeIndex;
-                    _animatronicCameras[a.Id] = route[routeIndex];
+                    MoveAnimatronicOneCamera(a.Id, 1);
+                    var routeIndex = _animatronicRouteIndices.GetValueOrDefault(a.Id);
                     NightSounds.Play("movement");
                     if (routeIndex == route.Length - 1)
                     {
@@ -2220,7 +2273,7 @@ internal sealed class GameForm : Form
             }
             if (_pendingUntil.TryGetValue(a.Id, out var until) && until <= _seconds && !_resolved.Contains(a.Id))
             {
-                if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} moved away"; _message = _lastResolved + ". Stay alert."; _animatronicRouteIndices[a.Id] = Math.Max(0, _animatronicRouteIndices.GetValueOrDefault(a.Id) - 2); _animatronicCameras[a.Id] = RouteFor(a.Id)[_animatronicRouteIndices[a.Id]]; }
+                if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} moved away"; _message = _lastResolved + ". Stay alert."; MoveAnimatronicOneCamera(a.Id, -1); }
                 else { _strikes++; _officeIntruderId = a.Id; _officeIntruderUntilUtc = DateTime.UtcNow.AddMilliseconds(1900); _lastResolved = $"{a.Name} entered the office"; _message = $"{_lastResolved}. Strike {_strikes} of 3."; }
                 _resolved.Add(a.Id); _pendingUntil.Remove(a.Id); _listening = false; _ventScanned = false;
                 if (a.Action == "scan") _ventThreatSide = null;
@@ -2243,7 +2296,7 @@ internal sealed class GameForm : Form
         _monitorOpen = !_monitorOpen;
         if (_monitorOpen) { _cameraMonitorMode = false; _selectedCamera = "1A"; }
         else _cameraMonitorMode = false;
-        if (_monitorOpen && _tennaFirstEncounterPending && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0)
+        if (_monitorOpen && IsAnimatronicSourceAvailable("mr-ant-tenna") && _tennaFirstEncounterPending && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0)
         {
             _tennaFirstEncounterPending = false;
             _tennaHijackCountdown = 5;
@@ -2279,10 +2332,20 @@ internal sealed class GameForm : Form
         ? route
         : ["1A", "1B", "4A", "4B"];
 
+    private void MoveAnimatronicOneCamera(string id, int direction)
+    {
+        var route = RouteFor(id);
+        var current = _animatronicRouteIndices.GetValueOrDefault(id);
+        var next = Math.Clamp(current + Math.Sign(direction), 0, route.Length - 1);
+        if (next == current) return;
+        _animatronicRouteIndices[id] = next;
+        _animatronicCameras[id] = route[next];
+    }
+
     private void SelectCamera(string cameraId)
     {
         _selectedCamera = cameraId;
-        if (cameraId == "2B" && _stageAnimatronics.Contains("golden-freddy") && _ai.GetValueOrDefault("golden-freddy") > 0 && !_goldenFreddyEncounterTriggered)
+        if (cameraId == "2B" && IsAnimatronicSourceAvailable("golden-freddy") && _stageAnimatronics.Contains("golden-freddy") && _ai.GetValueOrDefault("golden-freddy") > 0 && !_goldenFreddyEncounterTriggered)
         {
             _goldenFreddyReady = true;
             _goldenFreddyEncounterTriggered = true;
@@ -2308,7 +2371,7 @@ internal sealed class GameForm : Form
         _officeTaskSecondsRemaining = task.Seconds;
         if (task.Noisy)
         {
-            foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
+            foreach (var a in _sheets.Animatronics.Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
             {
                 if (_pendingUntil.ContainsKey(a.Id)) _pendingUntil[a.Id] = _seconds + _random.Next(3, 7);
                 else if (_nextAttack.ContainsKey(a.Id)) _nextAttack[a.Id] = Math.Min(_nextAttack[a.Id], _seconds + _random.Next(5, 11));
@@ -2322,6 +2385,8 @@ internal sealed class GameForm : Form
     private void BeginJumpscare(string? animatronicId)
     {
         _timer.Stop();
+        _nightPaused = false;
+        _nightOver = true;
         _tennaQuizActive = false;
         NightSounds.StopAmbience();
         NightSounds.Play(animatronicId == "golden-freddy" ? "golden-jumpscare" : "jumpscare");
@@ -2390,7 +2455,7 @@ internal sealed class GameForm : Form
 
     private void WindPuppetMusicBox()
     {
-        if (!_monitorOpen || !_cameraMonitorMode || _puppetEscaped || !_stageAnimatronics.Contains("puppet")) return;
+        if (!_monitorOpen || !_cameraMonitorMode || _puppetEscaped || !IsAnimatronicSourceAvailable("puppet") || !_stageAnimatronics.Contains("puppet")) return;
         _puppetMusicBox = Math.Min(100, _puppetMusicBox + 25);
         _message = $"Music box wound to {_puppetMusicBox}%. Keep it wound to hold the Puppet back.";
         Invalidate();
@@ -2464,11 +2529,11 @@ internal sealed class GameForm : Form
     };
 
     private Animatronic? CurrentThreat() => _sheets.Animatronics.FirstOrDefault(a => _pendingUntil.TryGetValue(a.Id, out var until) && until > _seconds && !_resolved.Contains(a.Id));
-    private int ActiveThreatCount() => _sheets.Animatronics.Count(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0);
+    private int ActiveThreatCount() => _sheets.Animatronics.Count(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0);
     private bool ActionAvailable(string action) => action switch
     {
         "left-door" or "right-door" => true, "left-light" => _leftLightOn || _doorPower > 0, "right-light" => _rightLightOn || _doorPower > 0,
-        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy"), "lure" => _owned.Contains("springtrap"),
+        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica"), "lure" => _owned.Contains("springtrap"),
         "listen" => _owned.Contains("nightmare-chica") && !_listening && _pendingUntil.TryGetValue("nightmare-chica", out var until) && until > _seconds && !_resolved.Contains("nightmare-chica"),
         "scan" => _owned.Contains("scrap-baby"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby"), _ => false
     };
@@ -2530,7 +2595,7 @@ internal sealed class GameForm : Form
         {
             var aiBonusBeforeStrikePenalty = (int)Math.Round(_payoutForNight * StagedAiPayoutMultiplier(), MidpointRounding.AwayFromZero);
             var animatronicBonusBeforeStrikePenalty = _sheets.Animatronics
-                .Where(a => _stageAnimatronics.Contains(a.Id) && _owned.Contains(a.Id) && _ai[a.Id] > 0)
+                .Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _owned.Contains(a.Id) && _ai[a.Id] > 0)
                 .Sum(_ => Random.Shared.Next(1, 11));
             var grossPayout = _payoutForNight + aiBonusBeforeStrikePenalty + animatronicBonusBeforeStrikePenalty;
             var strikePenalty = Math.Min(1d, _strikes * .25d);
@@ -2574,7 +2639,7 @@ internal sealed class GameForm : Form
 
     private double StagedAiPayoutMultiplier()
     {
-        return _stageAnimatronics.Where(id => _owned.Contains(id) && _ai.ContainsKey(id))
+        return _stageAnimatronics.Where(id => IsAnimatronicSourceAvailable(id) && _owned.Contains(id) && _ai.ContainsKey(id))
             .Sum(id => _ai[id] <= 5 ? 0d : 0.005d * (_ai[id] - 5) / 15d);
     }
 
@@ -2634,7 +2699,7 @@ internal sealed class GameForm : Form
         if (_unlockCategoriesCheatIndex < sequence.Length) return false;
         _unlockCategoriesCheatIndex = 0;
         _unlockedAnimatronicGames.UnionWith(_sheets.Games.Select(game => game.Id));
-        _cheatToastMessage = "CHEAT ACCEPTED · ANIMATRONIC CATEGORIES UNLOCKED";
+        _cheatToastMessage = "CHEAT ACCEPTED · ALL CHARACTER CATEGORIES UNLOCKED";
         _cheatToastUntilUtc = DateTime.UtcNow.AddSeconds(3);
         SaveActiveSlot();
         Invalidate();
@@ -2721,6 +2786,7 @@ internal sealed class GameForm : Form
     protected override void OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
+        if (_nightPaused || _jumpscareActive) return;
         var p = ToDesign(e.Location);
         if (_suppressNextMouseClick) { _suppressNextMouseClick = false; return; }
         if (_pendingDeleteSlot >= 0)
@@ -2876,7 +2942,7 @@ internal sealed class GameForm : Form
         if (_prepScreen == PrepScreen.Roster)
         {
             foreach (var (gameId, rect) in _animatronicCategoryUnlockRects)
-                if (rect.Contains(p) && !_unlockedAnimatronicGames.Contains(gameId) && _funds >= AnimatronicCategoryCost(gameId))
+                if (rect.Contains(p) && _sources[gameId].IsAvailable && !_unlockedAnimatronicGames.Contains(gameId) && _funds >= AnimatronicCategoryCost(gameId))
                 {
                     _pendingPurchaseId = gameId;
                     _pendingPurchaseKind = PurchaseKind.AnimatronicCategory;
@@ -2913,6 +2979,7 @@ internal sealed class GameForm : Form
                 {
                     if (!rect.Contains(p)) continue;
                     var a = _sheets.Animatronics.First(entry => entry.Id == id);
+                    if (!IsAnimatronicSourceAvailable(a)) return;
                     if (!_owned.Contains(id))
                     {
                         if (_funds >= a.Cost)
@@ -3019,6 +3086,19 @@ internal sealed class GameForm : Form
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.KeyCode == Keys.P && _nightStarted && !_nightOver && !_jumpscareActive)
+        {
+            ToggleNightPause();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+        if (_nightPaused || _jumpscareActive)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
         if (_tennaQuizActive) { e.Handled = true; e.SuppressKeyPress = true; return; }
         if (_waitingForBindingAction is not null)
         {
@@ -3081,7 +3161,7 @@ internal sealed class GameForm : Form
             if (_settingsOpen) _settingsOpen = false;
             else if (_saveMenuOpen) _saveMenuOpen = false;
             else if (_nightStarted && !_nightOver && _monitorOpen) ToggleOfficeMonitor();
-            else if (_nightStarted && !_nightOver) { _nightStarted = false; _prepScreen = PrepScreen.Builder; _timer.Stop(); NightSounds.StopAmbience(); SaveActiveSlot(); }
+            else if (_nightStarted && !_nightOver) { _nightStarted = false; _nightPaused = false; _prepScreen = PrepScreen.Builder; _timer.Stop(); NightSounds.StopAmbience(); SaveActiveSlot(); }
             else if (!_showMenu) { SaveActiveSlot(); _showMenu = true; NightSounds.StartMenuMusic(); }
             else Close();
             Invalidate(); return;
