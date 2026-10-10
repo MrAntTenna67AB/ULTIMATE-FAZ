@@ -77,6 +77,8 @@ internal sealed class GameForm : Form
     private int _tennaFailedAnswers;
     private int _tennaSecondsRemaining;
     private int _tennaQuizCooldownUntil;
+    private int _tennaHijackCountdown = -1;
+    private bool _tennaFirstEncounterPending;
     private int[] _tennaQuestionOrder = [];
     private string[] _tennaShuffledAnswers = [];
     private readonly Dictionary<int, RectangleF> _tennaAnswerRects = [];
@@ -1510,12 +1512,14 @@ internal sealed class GameForm : Form
 
     private void DrawCameraMonitor(Graphics g, RectangleF panel)
     {
-        var feed = new RectangleF(panel.X + 18, panel.Y + 62, panel.Width - 36, panel.Height * .56f);
+        var contentY = panel.Y + 62;
+        var contentHeight = panel.Height - 80;
+        var feed = new RectangleF(panel.X + 18, contentY, panel.Width * .47f, contentHeight);
         using (var fill = new SolidBrush(Color.FromArgb(18, 25, 24))) g.FillRectangle(fill, feed);
         using (var border = new Pen(_edge)) g.DrawRectangle(border, feed.X, feed.Y, feed.Width, feed.Height);
         var camera = FnafCameras.FirstOrDefault(c => c.Id == _selectedCamera);
         DrawText(g, $"CAM {camera.Id}  /  {camera.Name}", _smallFont, _gold, feed.X + 14, feed.Y + 12, feed.Width - 28, 18);
-        var room = new RectangleF(feed.X + 12, feed.Y + 40, feed.Width - 24, feed.Height - 52);
+        var room = new RectangleF(feed.X + 12, feed.Y + 42, feed.Width - 24, Math.Min(250, feed.Height * .52f));
         using (var roomFill = new LinearGradientBrush(room, Color.FromArgb(31, 41, 39), Color.FromArgb(8, 12, 12), 90f)) g.FillRectangle(roomFill, room);
         DrawLine(g, Color.FromArgb(85, 110, 103), 1, room.X + 12, room.Y + room.Height * .67f, room.Right - 12, room.Y + room.Height * .67f);
         DrawLine(g, Color.FromArgb(85, 110, 103), 1, room.X + 24, room.Bottom - 18, room.Right - 24, room.Bottom - 18);
@@ -1532,43 +1536,51 @@ internal sealed class GameForm : Form
         else
         {
             var visibleCount = Math.Min(4, occupants.Length);
-            var portraitWidth = Math.Min(178, (room.Width - 42f) / visibleCount - 12);
-            var portraitHeight = Math.Min(190, room.Height - 47);
-            var groupWidth = visibleCount * portraitWidth + (visibleCount - 1) * 16;
+            var portraitWidth = Math.Min(160, (room.Width - 42f) / visibleCount - 12);
+            var portraitHeight = Math.Min(174, room.Height - 49);
+            var groupWidth = visibleCount * portraitWidth + (visibleCount - 1) * 12;
             var startX = room.X + (room.Width - groupWidth) / 2;
             for (var i = 0; i < visibleCount; i++)
             {
-                var portrait = new RectangleF(startX + i * (portraitWidth + 16), room.Y + 8, portraitWidth, portraitHeight);
+                var portrait = new RectangleF(startX + i * (portraitWidth + 12), room.Y + 8, portraitWidth, portraitHeight);
                 DrawPortraitFrame(g, occupants[i]!, portrait);
                 DrawText(g, occupants[i]!.Name.ToUpperInvariant(), _smallFont, _ink, portrait.X - 2, portrait.Bottom + 4, portrait.Width + 4, 18, StringAlignment.Center);
             }
             if (occupants.Length > visibleCount) DrawText(g, $"+{occupants.Length - visibleCount} MORE ON THIS CAMERA", _smallFont, _gold, room.X, room.Bottom - 20, room.Width, 18, StringAlignment.Center);
         }
-        var map = new RectangleF(feed.X, feed.Bottom + 8, feed.Width, panel.Bottom - feed.Bottom - 26);
+        DrawText(g, "LIVE CAMERA FEED · ANIMATRONIC PORTRAITS", _smallFont, _teal, feed.X + 12, room.Bottom + 17, feed.Width - 24, 18);
+
+        var map = new RectangleF(feed.Right + 12, contentY, panel.Right - feed.Right - 30, contentHeight);
         using (var fill = new SolidBrush(Color.FromArgb(12, 17, 17))) g.FillRectangle(fill, map);
         using (var border = new Pen(_edge)) g.DrawRectangle(border, map.X, map.Y, map.Width, map.Height);
-        DrawText(g, "CAMERA MAP · SELECT A FEED", _smallFont, _teal, map.X + 12, map.Y + 5, map.Width - 24, 17);
-        var nodeIds = FnafCameras.Select(x => x.Id).ToArray();
-        const int columns = 6;
-        var cellW = (map.Width - 28) / columns;
-        const float nodeH = 30;
-        for (var i = 0; i < nodeIds.Length; i++)
+        DrawText(g, "CAMERA MAP · SELECT A FEED", _smallFont, _teal, map.X + 12, map.Y + 8, map.Width - 24, 18);
+        var placements = new Dictionary<string, PointF>
         {
-            var row = i / columns;
-            var column = i % columns;
-            var itemsInRow = Math.Min(columns, nodeIds.Length - row * columns);
-            var rowWidth = itemsInRow * cellW;
-            var rowX = map.X + (map.Width - rowWidth) / 2;
-            var node = new RectangleF(rowX + column * cellW + 4, map.Y + 27 + row * 36, cellW - 8, nodeH);
-            var id = nodeIds[i];
+            ["1A"] = new(.5f, .10f), ["1B"] = new(.5f, .38f), ["1C"] = new(.14f, .13f),
+            ["2A"] = new(.12f, .50f), ["2B"] = new(.12f, .70f), ["3"] = new(.12f, .32f),
+            ["4A"] = new(.88f, .50f), ["4B"] = new(.88f, .70f), ["5"] = new(.5f, .23f),
+            ["6"] = new(.88f, .13f), ["7"] = new(.88f, .32f)
+        };
+        PointF CenterOf(string id) => new(map.X + map.Width * placements[id].X, map.Y + map.Height * placements[id].Y + 15);
+        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1B", "2A"), ("2A", "2B"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B") };
+        using (var corridor = new Pen(Color.FromArgb(85, 95, 83, 65), 3))
+            foreach (var (from, to) in links) g.DrawLine(corridor, CenterOf(from), CenterOf(to));
+        var nodeW = Math.Min(94, map.Width * .43f);
+        const float nodeH = 31;
+        foreach (var (id, point) in placements)
+        {
+            var node = new RectangleF(map.X + map.Width * point.X - nodeW / 2, map.Y + map.Height * point.Y, nodeW, nodeH);
             _cameraSelectRects[id] = node;
             var selected = id == _selectedCamera;
             var occupied = _animatronicCameras.Values.Contains(id, StringComparer.OrdinalIgnoreCase);
             using var nodeFill = new SolidBrush(selected ? Color.FromArgb(53, 39, 21) : Color.FromArgb(24, 31, 30));
             using var nodeEdge = new Pen(occupied ? _red : selected ? _gold : _edge, selected || occupied ? 2 : 1);
             g.FillRectangle(nodeFill, node); g.DrawRectangle(nodeEdge, node.X, node.Y, node.Width, node.Height);
-            DrawText(g, $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 6, node.Width, 17, StringAlignment.Center);
+            DrawText(g, $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 7, node.Width, 17, StringAlignment.Center);
         }
+        var office = new RectangleF(map.X + map.Width * .28f, map.Bottom - 42, map.Width * .44f, 28);
+        using var officeFill = new SolidBrush(Color.FromArgb(61, 28, 26)); g.FillRectangle(officeFill, office);
+        DrawText(g, "OFFICE", _smallFont, _red, office.X, office.Y + 6, office.Width, 17, StringAlignment.Center);
     }
 
     private void DrawOfficeIntruder(Graphics g, RectangleF office, string id)
@@ -1873,6 +1885,8 @@ internal sealed class GameForm : Form
         _payoutAnimatronicBonusCollected = 0;
         _dayResetByDeath = false;
         _tennaQuizActive = false; _tennaFailedAnswers = 0; _tennaQuestionOrder = []; _tennaShuffledAnswers = []; _tennaQuizCooldownUntil = 0;
+        _tennaFirstEncounterPending = _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0;
+        _tennaHijackCountdown = -1;
         _goldenFreddyReady = false; _goldenFreddyEncounterTriggered = false;
         _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
@@ -1953,12 +1967,17 @@ internal sealed class GameForm : Form
                 NightSounds.Play("powerdown");
             }
         }
-        if (_monitorOpen && _seconds >= _tennaQuizCooldownUntil &&
-            _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0 && _random.Next(240) == 0)
+        if (_monitorOpen && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0 &&
+            (_tennaHijackCountdown >= 0 || (_seconds >= _tennaQuizCooldownUntil && _random.Next(60) == 0)))
         {
-            StartTennaQuiz();
-            Invalidate();
-            return;
+            if (_tennaHijackCountdown > 0) _tennaHijackCountdown--;
+            if (_tennaHijackCountdown == 0 || (_tennaHijackCountdown < 0 && _seconds >= _tennaQuizCooldownUntil))
+            {
+                _tennaHijackCountdown = -1;
+                StartTennaQuiz();
+                Invalidate();
+                return;
+            }
         }
         if (_ventCooldown > 0) _ventCooldown--;
         if (_seconds % 4 == 0)
@@ -1999,7 +2018,7 @@ internal sealed class GameForm : Form
             }
         }
         if (_strikes >= 3) { BeginJumpscare(_officeIntruderId); return; }
-        else if (_seconds >= NightSteps) FinishNight(false);
+        else if (_seconds >= NightSteps) FinishNight(true);
         Invalidate();
     }
 
@@ -2015,6 +2034,12 @@ internal sealed class GameForm : Form
         _monitorOpen = !_monitorOpen;
         if (_monitorOpen) { _cameraMonitorMode = false; _selectedCamera = "1A"; }
         else _cameraMonitorMode = false;
+        if (_monitorOpen && _tennaFirstEncounterPending && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0)
+        {
+            _tennaFirstEncounterPending = false;
+            _tennaHijackCountdown = 5;
+            _message = "A signal is forcing its way onto the monitor...";
+        }
         NightSounds.Play(_monitorOpen ? "monitor-up" : "monitor-down");
         if (_monitorOpen && _pendingUntil.ContainsKey("golden-freddy"))
         {
