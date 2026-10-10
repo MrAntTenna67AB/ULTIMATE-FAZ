@@ -20,6 +20,8 @@ internal static class NightSounds
         ["task"] = "blip3.wav",
         ["jumpscare"] = "fnaf one jumpscare.wav",
         ["golden-jumpscare"] = "fnaf one golden freddy jumpscare.wav",
+        ["pee-monster-jumpscare"] = "pee monster jumpscare.wav",
+        ["charlie-kirk-jumpscare"] = "we are charlie kirk.ogg",
         ["six-am"] = "when hitting 6 am (plays beffore the winning a night one).wav",
         ["win"] = "winning a night.wav"
     };

@@ -22,7 +22,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Fazbear Pizzeria After Hours", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ex.Message, "Ultimate Fazbear", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -191,7 +191,7 @@ internal sealed class MainForm : Form
         _demo = demo;
         _money = sheets.StartingFunds;
         foreach (var row in sheets.Animatronics) _ai[row.Id] = sheets.DefaultAiLevel;
-        Text = "Fazbear Pizzeria After Hours";
+        Text = "Ultimate Fazbear";
         ClientSize = new Size(1180, 820);
         MinimumSize = new Size(960, 720);
         BackColor = Color.FromArgb(8, 12, 16);

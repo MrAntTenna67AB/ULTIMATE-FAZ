@@ -86,7 +86,13 @@ internal sealed class GameForm : Form
     private int _puppetMusicBox = 100;
     private bool _puppetEscaped;
     private RectangleF _puppetWindRect;
+    private bool _mangleOnCeiling;
+    private int _mangleStaticSeconds;
     private bool _tennaQuizActive;
+    private bool _charlieDebateActive;
+    private int _charlieQuestionPosition;
+    private int _charlieSecondsRemaining;
+    private string[] _charlieShuffledAnswers = [];
     private int _tennaQuestionPosition;
     private int _tennaCorrectAnswers;
     private int _tennaFailedAnswers;
@@ -108,6 +114,7 @@ internal sealed class GameForm : Form
     private bool _nightWon;
     private bool _nightStarted;
     private bool _nightPaused;
+    private bool _peeMonsterTintActive;
     private bool _dayResetByDeath;
     private bool _jumpscareActive;
     private string? _officeIntruderId;
@@ -220,13 +227,21 @@ internal sealed class GameForm : Form
         new("Will you buy Mr. (ant) Tenna merch (trademark pending)?", ["Yes we will!", "No.", "Yes daddy CRT"], "Yes we will!"),
         new("Do you love TV?", ["I LOVE TV!!!", "I HATE TV!!!"], "I LOVE TV!!!")
     ];
+    private static readonly TennaQuestion[] CharlieQuestions =
+    [
+        new("Should society return to Hitler's regime?", ["No. That regime was horrific.", "Yes."], "No. That regime was horrific."),
+        new("Is President Donald Trump acting in the interests of the American people?", ["I'm not convinced.", "Yes, absolutely."], "I'm not convinced."),
+        new("Is Israel only defending itself?", ["That is too simple; civilians everywhere deserve protection.", "Yes, only that."], "That is too simple; civilians everywhere deserve protection.")
+    ];
     private static readonly (string Id, string Name)[] FnafCameras =
     [
-        ("1A", "SHOW STAGE"), ("1B", "DINING AREA"), ("1C", "PIRATE COVE"),
+        ("1A", "SHOW STAGE"), ("1B", "DINING AREA"), ("1C", "COVE"),
         ("10", "GAME AREA"),
         ("2A", "WEST HALL"), ("2B", "WEST CORNER"), ("3", "SUPPLY CLOSET"),
         ("4A", "EAST HALL"), ("4B", "EAST CORNER"), ("5", "BACKSTAGE"),
-        ("6", "KITCHEN"), ("7", "RESTROOMS")
+        ("6", "KITCHEN"), ("7", "RESTROOMS"),
+        ("F2-KC", "KID'S COVE"), ("F2-PC", "PRIZE CORNER"), ("F2-GA", "GAME AREA"), ("F2-MH", "MAIN HALL"),
+        ("F2-OH", "OFFICE HALLWAY"), ("F2-PR1", "PARTY ROOM 1"), ("F2-PR2", "PARTY ROOM 2"), ("F2-RV", "RIGHT AIR VENT")
     ];
     private static readonly Dictionary<string, string[]> AnimatronicRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -236,8 +251,11 @@ internal sealed class GameForm : Form
         ["bonnie"] = ["1A", "1B", "2A", "2B"],
         ["chica"] = ["1A", "1B", "7", "4A", "4B"],
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
-        ["toy-freddy"] = ["1A", "10", "2A", "2B"],
+        ["toy-freddy"] = ["1A", "10", "1B", "2A", "2B"],
         ["toy-chica"] = ["1A", "5", "1B", "2A", "2B"],
+        ["mangle"] = ["F2-KC", "F2-PC", "F2-GA", "F2-MH", "F2-OH", "F2-PR1", "F2-PR2", "F2-RV"],
+        ["charlie-kirk"] = ["1A", "1B", "2A", "2B"],
+        ["pee-monster"] = ["1A", "7", "V1"],
         ["puppet"] = ["1A"],
         ["springtrap"] = ["1A", "5", "3", "2A", "2B"],
         ["nightmare-chica"] = ["1A", "1B", "6", "2A", "2B"],
@@ -324,7 +342,7 @@ internal sealed class GameForm : Form
             if (!File.Exists(path)) continue;
             try { using var image = Image.FromFile(path); _catalogAttractionArt[attraction.Id] = new Bitmap(image); } catch { }
         }
-        Text = "Fazbear Pizzeria After Hours";
+        Text = "Ultimate Fazbear";
         FormBorderStyle = _isFullscreen ? FormBorderStyle.None : FormBorderStyle.Sizable;
         WindowState = _isFullscreen ? FormWindowState.Maximized : FormWindowState.Normal;
         if (!_isFullscreen) Size = new Size(1280, 720);
@@ -391,8 +409,9 @@ internal sealed class GameForm : Form
         else if (_showMenu) DrawMenu(g);
         else if (_jumpscareActive) DrawJumpscare(g);
         else if (_tennaQuizActive) DrawTennaQuiz(g);
+        else if (_charlieDebateActive) DrawCharlieDebate(g);
         else if (_nightStarted && _nightOver) DrawResult(g);
-        else if (_nightStarted) { DrawNight(g); if (_nightPaused) DrawPauseOverlay(g); }
+        else if (_nightStarted) { DrawNight(g); if (_peeMonsterTintActive && !_nightOver) DrawPeeMonsterTint(g); if (_nightPaused) DrawPauseOverlay(g); }
         else DrawPizzeria(g);
         DrawCheatToast(g);
         if (_pendingPurchaseKind != PurchaseKind.None) DrawPurchaseConfirmation(g);
@@ -414,8 +433,8 @@ internal sealed class GameForm : Form
 
     private void DrawHeader(Graphics g)
     {
-        DrawText(g, "FAZBEAR ENTERTAINMENT", _smallFont, _gold, 48, 17);
-        DrawText(g, "FREDDY FAZBEAR'S PIZZERIA", _brandFont, _ink, 48, 34);
+        DrawText(g, "ULTIMATE FAZBEAR", _smallFont, _gold, 48, 17);
+        DrawText(g, "ULTIMATE FAZBEAR", _brandFont, _ink, 48, 34);
         if (!_showMenu)
         {
             var phase = _nightStarted ? $"NIGHT {_day:00}  /  OFFICE SHIFT" : $"DAY {_day:00}  /  {(_prepScreen == PrepScreen.Builder ? "CATALOG" : _prepScreen == PrepScreen.Blueprint ? "BLUEPRINT" : "ANIMATRONIC ROSTER")}";
@@ -439,8 +458,8 @@ internal sealed class GameForm : Form
             DrawSaveMenu(g);
             return;
         }
-        DrawText(g, "FREDDY FAZBEAR'S", _smallFont, _gold, 88, 179);
-        DrawText(g, "PIZZERIA", _menuTitleFont, _ink, 82, 198, 720, 80);
+        DrawText(g, "ULTIMATE", _smallFont, _gold, 88, 179);
+        DrawText(g, "FAZBEAR", _menuTitleFont, _ink, 82, 198, 720, 80);
         DrawText(g, "AFTER HOURS", _menuSubtitleFont, _teal, 88, 273, 600, 48);
         DrawText(g, "BUILD A FAMILY PIZZERIA BY DAY.", _panelTitleFont, _ink, 90, 365, 640, 30);
         DrawText(g, "BUY ATTRACTIONS. ADD ANIMATRONICS. SURVIVE THE NIGHT.", _bodyFont, _muted, 90, 401, 800, 25);
@@ -1611,6 +1630,12 @@ internal sealed class GameForm : Form
         DrawText(g, "PRESS P TO RESUME", _smallFont, _ink, panel.X + 24, panel.Y + 77, panel.Width - 48, 20, StringAlignment.Center);
     }
 
+    private static void DrawPeeMonsterTint(Graphics g)
+    {
+        using var tint = new SolidBrush(Color.FromArgb(72, 255, 218, 61));
+        g.FillRectangle(tint, 0, 0, DesignWidth, DesignHeight);
+    }
+
     private void DrawOffice(Graphics g, RectangleF r)
     {
         DrawPanel(g, r, Color.FromArgb(7, 12, 13));
@@ -1630,7 +1655,7 @@ internal sealed class GameForm : Form
         using (var paper = new SolidBrush(Color.FromArgb(174, 161, 132))) g.FillRectangle(paper, r.X + r.Width / 2 - 100, r.Y + 446, 51, 28);
         DrawText(g, "PARTY", _smallFont, Color.FromArgb(46, 32, 30), r.X + r.Width / 2 - 97, r.Y + 451, 45, 16, StringAlignment.Center);
         DrawText(g, "CAM FEED  /  EAST HALL", _smallFont, _muted, r.X + 22, r.Y + 20);
-        DrawText(g, "FREDDY FAZBEAR'S PIZZERIA", _smallFont, Color.FromArgb(105, 122, 112), r.X + 22, r.Bottom - 35);
+        DrawText(g, "ULTIMATE FAZBEAR", _smallFont, Color.FromArgb(105, 122, 112), r.X + 22, r.Bottom - 35);
         DrawText(g, $"LEFT {(_leftDoorClosed ? "CLOSED" : "OPEN")}  ·  RIGHT {(_rightDoorClosed ? "CLOSED" : "OPEN")}", _smallFont, (_leftDoorClosed || _rightDoorClosed) ? _gold : _muted, r.Right - 390, r.Y + 20, 364, 20, StringAlignment.Far);
         DrawOfficeDoor(g, new RectangleF(r.X + 101, r.Y + 65, 98, 330), _leftDoorClosed);
         DrawOfficeDoor(g, new RectangleF(r.Right - 199, r.Y + 65, 98, 330), _rightDoorClosed);
@@ -1645,7 +1670,13 @@ internal sealed class GameForm : Form
         var threat = CurrentThreat();
         var intruderVisible = _officeIntruderId is not null && DateTime.UtcNow < _officeIntruderUntilUtc;
         if (intruderVisible) DrawOfficeIntruder(g, r, _officeIntruderId!);
-        if (threat is null && !intruderVisible)
+        if (_mangleOnCeiling && _portraitArt.TryGetValue("mangle", out var ceilingMangle))
+        {
+            var ceilingImage = new RectangleF(r.X + r.Width * .43f, r.Y + 45, r.Width * .15f, 105);
+            g.DrawImage(ceilingMangle, ceilingImage);
+            DrawText(g, "MANGLE ON THE CEILING", _smallFont, _red, ceilingImage.X - 40, ceilingImage.Bottom + 4, ceilingImage.Width + 80, 18, StringAlignment.Center);
+        }
+        if (threat is null && !intruderVisible && !_mangleOnCeiling)
             DrawText(g, "NO MOVEMENT", _noMovementFont, Color.FromArgb(103, 136, 121), r.X + 260, r.Y + 222, 250, 28, StringAlignment.Center);
         var bar = new RectangleF(r.X + 35, r.Bottom - 83, r.Width - 70, 7);
         using var track = new SolidBrush(Color.FromArgb(45, 56, 53)); g.FillRectangle(track, bar);
@@ -1745,6 +1776,7 @@ internal sealed class GameForm : Form
             }
             if (occupants.Length > visibleCount) DrawText(g, $"+{occupants.Length - visibleCount} MORE ON THIS CAMERA", _smallFont, _gold, room.X, room.Bottom - 20, room.Width, 18, StringAlignment.Center);
         }
+        if (_mangleStaticSeconds > 0) DrawMangleStatic(g, room);
         DrawText(g, "LIVE CAMERA FEED · ANIMATRONIC PORTRAITS", _smallFont, _teal, feed.X + 12, room.Bottom + 17, feed.Width - 24, 18);
         if (IsAnimatronicSourceAvailable("puppet") && _stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
         {
@@ -1770,13 +1802,15 @@ internal sealed class GameForm : Form
         DrawText(g, "CAMERA MAP · SELECT A FEED", _smallFont, _teal, map.X + 12, map.Y + 8, map.Width - 24, 18);
         var placements = new Dictionary<string, PointF>
         {
-            ["1A"] = new(.5f, .10f), ["1B"] = new(.5f, .38f), ["1C"] = new(.14f, .13f), ["10"] = new(.5f, .55f),
-            ["2A"] = new(.12f, .50f), ["2B"] = new(.12f, .70f), ["3"] = new(.12f, .32f),
-            ["4A"] = new(.88f, .50f), ["4B"] = new(.88f, .70f), ["5"] = new(.5f, .23f),
-            ["6"] = new(.88f, .13f), ["7"] = new(.88f, .32f)
+            ["1A"] = new(.50f, .07f), ["1B"] = new(.50f, .27f), ["1C"] = new(.15f, .07f), ["10"] = new(.85f, .07f),
+            ["2A"] = new(.16f, .41f), ["2B"] = new(.16f, .53f), ["3"] = new(.39f, .41f), ["4A"] = new(.68f, .41f),
+            ["4B"] = new(.68f, .53f), ["5"] = new(.50f, .17f), ["6"] = new(.85f, .53f), ["7"] = new(.85f, .41f),
+            ["F2-KC"] = new(.14f, .66f), ["F2-PC"] = new(.38f, .66f), ["F2-GA"] = new(.62f, .66f), ["F2-MH"] = new(.86f, .66f),
+            ["F2-RV"] = new(.14f, .80f), ["F2-PR2"] = new(.38f, .80f), ["F2-PR1"] = new(.62f, .80f), ["F2-OH"] = new(.86f, .80f)
         };
         PointF CenterOf(string id) => new(map.X + map.Width * placements[id].X, map.Y + map.Height * placements[id].Y + 15);
-        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1A", "10"), ("10", "2A"), ("1B", "2A"), ("2A", "2B"), ("3", "2A"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B") };
+        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1A", "10"), ("10", "1B"), ("1B", "2A"), ("2A", "2B"), ("3", "2A"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B"),
+            ("F2-KC", "F2-PC"), ("F2-PC", "F2-GA"), ("F2-GA", "F2-MH"), ("F2-MH", "F2-OH"), ("F2-OH", "F2-PR1"), ("F2-PR1", "F2-PR2"), ("F2-PR2", "F2-RV") };
         using (var corridor = new Pen(Color.FromArgb(85, 95, 83, 65), 3))
             foreach (var (from, to) in links) g.DrawLine(corridor, CenterOf(from), CenterOf(to));
         var nodeW = Math.Min(94, map.Width * .43f);
@@ -1795,6 +1829,22 @@ internal sealed class GameForm : Form
         var office = new RectangleF(map.X + map.Width * .28f, map.Bottom - 42, map.Width * .44f, 28);
         using var officeFill = new SolidBrush(Color.FromArgb(61, 28, 26)); g.FillRectangle(officeFill, office);
         DrawText(g, "OFFICE", _smallFont, _red, office.X, office.Y + 6, office.Width, 17, StringAlignment.Center);
+    }
+
+    private void DrawMangleStatic(Graphics g, RectangleF bounds)
+    {
+        using var wash = new SolidBrush(Color.FromArgb(150, 178, 188, 187));
+        g.FillRectangle(wash, bounds);
+        var frame = Environment.TickCount64 / 35;
+        for (var i = 0; i < 20; i++)
+        {
+            var y = bounds.Y + (float)((i * 37 + frame * 13) % Math.Max(1, (int)bounds.Height));
+            var xOffset = (float)(Math.Sin(frame * .7 + i * 2.3) * bounds.Width * .24);
+            var alpha = 80 + (i * 23 % 150);
+            using var noise = new Pen(Color.FromArgb(alpha, 225, 235, 233), i % 5 == 0 ? 3 : 1);
+            g.DrawLine(noise, bounds.X + Math.Max(0, xOffset), y, bounds.Right - Math.Max(0, -xOffset), y);
+        }
+        DrawText(g, "SIGNAL INTERFERENCE", _smallFont, Color.White, bounds.X + 8, bounds.Y + 8, bounds.Width - 16, 20, StringAlignment.Center);
     }
 
     private void DrawOfficeIntruder(Graphics g, RectangleF office, string id)
@@ -2109,11 +2159,11 @@ internal sealed class GameForm : Form
         _payoutAiBonusCollected = 0;
         _payoutAnimatronicBonusCollected = 0;
         _dayResetByDeath = false;
-        _tennaQuizActive = false; _tennaFailedAnswers = 0; _tennaQuestionOrder = []; _tennaShuffledAnswers = []; _tennaQuizCooldownUntil = 0;
+        _tennaQuizActive = false; _charlieDebateActive = false; _charlieQuestionPosition = 0; _charlieShuffledAnswers = []; _tennaFailedAnswers = 0; _tennaQuestionOrder = []; _tennaShuffledAnswers = []; _tennaQuizCooldownUntil = 0;
         _tennaFirstEncounterPending = IsAnimatronicSourceAvailable("mr-ant-tenna") && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0;
         _tennaHijackCountdown = -1;
         _goldenFreddyReady = false; _goldenFreddyEncounterTriggered = false;
-        _nightStarted = true; _nightOver = false; _nightPaused = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
+        _nightStarted = true; _nightOver = false; _nightPaused = false; _peeMonsterTintActive = false; _mangleOnCeiling = false; _mangleStaticSeconds = 0; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
             ? "No animatronics tonight. Raise the terminal monitor and finish all 11 office tasks."
@@ -2157,7 +2207,14 @@ internal sealed class GameForm : Form
             Invalidate();
             return;
         }
+        if (_charlieDebateActive)
+        {
+            if (--_charlieSecondsRemaining <= 0) SubmitCharlieAnswer(null);
+            Invalidate();
+            return;
+        }
         _seconds++;
+        if (_mangleStaticSeconds > 0) _mangleStaticSeconds--;
         if (_activeOfficeTaskId is not null && --_officeTaskSecondsRemaining <= 0)
         {
             _completedOfficeTasks.Add(_activeOfficeTaskId);
@@ -2250,6 +2307,7 @@ internal sealed class GameForm : Form
         foreach (var a in _sheets.Animatronics.Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
             if (a.Action == "puppet") continue;
+            if (a.Id.Equals("mangle", StringComparison.OrdinalIgnoreCase) && _mangleOnCeiling) continue;
             if (_nextAttack.TryGetValue(a.Id, out var due) && due <= _seconds && !_pendingUntil.ContainsKey(a.Id))
             {
                 var route = RouteFor(a.Id);
@@ -2258,8 +2316,12 @@ internal sealed class GameForm : Form
                 var cameraPaused = _cameraMonitorMode && _monitorOpen && (a.Id.Equals("freddy", StringComparison.OrdinalIgnoreCase) || a.Id.Equals("foxy", StringComparison.OrdinalIgnoreCase));
                 if (!cameraPaused && _random.Next(1, 21) <= _ai[a.Id])
                 {
+                    var previousCamera = route[_animatronicRouteIndices.GetValueOrDefault(a.Id)];
                     MoveAnimatronicOneCamera(a.Id, 1);
                     var routeIndex = _animatronicRouteIndices.GetValueOrDefault(a.Id);
+                    var currentCamera = route[routeIndex];
+                    if (a.Id.Equals("mangle", StringComparison.OrdinalIgnoreCase) && previousCamera != currentCamera && _monitorOpen && _cameraMonitorMode && (_selectedCamera == previousCamera || _selectedCamera == currentCamera))
+                        _mangleStaticSeconds = 2;
                     NightSounds.Play("movement");
                     if (routeIndex == route.Length - 1)
                     {
@@ -2273,8 +2335,51 @@ internal sealed class GameForm : Form
             }
             if (_pendingUntil.TryGetValue(a.Id, out var until) && until <= _seconds && !_resolved.Contains(a.Id))
             {
-                if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} moved away"; _message = _lastResolved + ". Stay alert."; MoveAnimatronicOneCamera(a.Id, -1); }
-                else { _strikes++; _officeIntruderId = a.Id; _officeIntruderUntilUtc = DateTime.UtcNow.AddMilliseconds(1900); _lastResolved = $"{a.Name} entered the office"; _message = $"{_lastResolved}. Strike {_strikes} of 3."; }
+                if (a.Id.Equals("mangle", StringComparison.OrdinalIgnoreCase))
+                {
+                    _pendingUntil.Remove(a.Id);
+                    _resolved.Add(a.Id);
+                    _listening = false;
+                    if (_maskOn)
+                    {
+                        var mainHallIndex = Array.IndexOf(RouteFor(a.Id), "F2-MH");
+                        _animatronicRouteIndices[a.Id] = mainHallIndex;
+                        _animatronicCameras[a.Id] = "F2-MH";
+                        _nextAttack[a.Id] = _seconds + MovementOpportunityInterval(a.Id);
+                        _message = "The Freddy head drove Mangle out of the right vent and back to the Main Hall.";
+                    }
+                    else if (_officeIntruderId is not null && !_officeIntruderId.Equals("mangle", StringComparison.OrdinalIgnoreCase) && DateTime.UtcNow < _officeIntruderUntilUtc)
+                    {
+                        _mangleOnCeiling = true;
+                        _animatronicCameras.Remove(a.Id);
+                        _message = "Mangle climbed into the office ceiling. The mask cannot repel them now; lowering the monitor may trigger an attack.";
+                    }
+                    else
+                    {
+                        _nextAttack[a.Id] = _seconds + MovementOpportunityInterval(a.Id);
+                        _message = "Mangle is waiting in the right air vent for another animatronic to enter the office.";
+                    }
+                    Invalidate();
+                    continue;
+                }
+                if (a.Id.Equals("charlie-kirk", StringComparison.OrdinalIgnoreCase))
+                {
+                    _resolved.Add(a.Id);
+                    _pendingUntil.Remove(a.Id);
+                    StartCharlieDebate();
+                    Invalidate();
+                    return;
+                }
+                if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} returned to the stage"; _message = _lastResolved + ". Stay alert."; ResetAnimatronicToStage(a.Id); }
+                else
+                {
+                    _strikes++; _officeIntruderId = a.Id; _officeIntruderUntilUtc = DateTime.UtcNow.AddMilliseconds(1900); _lastResolved = $"{a.Name} entered the office"; _message = $"{_lastResolved}. Strike {_strikes} of 3.";
+                    if (a.Id.Equals("pee-monster", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _peeMonsterTintActive = true;
+                        _message += " A yellow tint will remain until the night ends.";
+                    }
+                }
                 _resolved.Add(a.Id); _pendingUntil.Remove(a.Id); _listening = false; _ventScanned = false;
                 if (a.Action == "scan") _ventThreatSide = null;
             }
@@ -2303,6 +2408,18 @@ internal sealed class GameForm : Form
             _message = "A signal is forcing its way onto the monitor...";
         }
         NightSounds.Play(_monitorOpen ? "monitor-up" : "monitor-down");
+        if (loweringMonitor && _mangleOnCeiling)
+        {
+            if (_random.Next(1, 21) <= _ai.GetValueOrDefault("mangle"))
+            {
+                _message = "Mangle dropped from the office ceiling!";
+                BeginJumpscare("mangle");
+                return;
+            }
+            _message = "Mangle is still on the ceiling. The monitor cycle did not trigger an attack this time.";
+            Invalidate();
+            return;
+        }
         if (_monitorOpen && _pendingUntil.ContainsKey("golden-freddy"))
         {
             _pendingUntil.Remove("golden-freddy"); _resolved.Add("golden-freddy");
@@ -2340,6 +2457,12 @@ internal sealed class GameForm : Form
         if (next == current) return;
         _animatronicRouteIndices[id] = next;
         _animatronicCameras[id] = route[next];
+    }
+
+    private void ResetAnimatronicToStage(string id)
+    {
+        _animatronicRouteIndices[id] = 0;
+        _animatronicCameras[id] = RouteFor(id)[0];
     }
 
     private void SelectCamera(string cameraId)
@@ -2388,9 +2511,17 @@ internal sealed class GameForm : Form
         _nightPaused = false;
         _nightOver = true;
         _tennaQuizActive = false;
+        _charlieDebateActive = false;
         NightSounds.StopAmbience();
-        NightSounds.Play(animatronicId == "golden-freddy" ? "golden-jumpscare" : "jumpscare");
+        NightSounds.Play(animatronicId switch
+        {
+            "golden-freddy" => "golden-jumpscare",
+            "pee-monster" => "pee-monster-jumpscare",
+            "charlie-kirk" => "charlie-kirk-jumpscare",
+            _ => "jumpscare"
+        });
         _jumpscareAnimatronicId = animatronicId;
+        _jumpscareTimer.Interval = animatronicId?.Equals("charlie-kirk", StringComparison.OrdinalIgnoreCase) == true ? 12_000 : 1_100;
         if (animatronicId is not null && _jumpscareArt.TryGetValue(animatronicId, out var scareImage) && ImageAnimator.CanAnimate(scareImage))
             ImageAnimator.Animate(scareImage, OnJumpscareFrameChanged);
         _jumpscareActive = true;
@@ -2453,6 +2584,44 @@ internal sealed class GameForm : Form
             : "Quiz failed. Tenna may return; wrong answers cost 20% battery each.";
     }
 
+    private void StartCharlieDebate()
+    {
+        _charlieQuestionPosition = 0;
+        _charlieDebateActive = true;
+        PrepareCharlieQuestion();
+        _message = "Charlie Kirk is debating you. Answer all three questions before time runs out.";
+    }
+
+    private void PrepareCharlieQuestion()
+    {
+        var question = CharlieQuestions[_charlieQuestionPosition];
+        _charlieShuffledAnswers = question.Answers.OrderBy(_ => _random.Next()).ToArray();
+        _charlieSecondsRemaining = 7;
+    }
+
+    private void SubmitCharlieAnswer(string? answer)
+    {
+        if (!_charlieDebateActive) return;
+        var question = CharlieQuestions[_charlieQuestionPosition];
+        if (answer is null || !answer.Equals(question.CorrectAnswer, StringComparison.OrdinalIgnoreCase))
+        {
+            _charlieDebateActive = false;
+            _message = "Debate failed. The shift ended.";
+            BeginJumpscare("charlie-kirk");
+            return;
+        }
+        _charlieQuestionPosition++;
+        if (_charlieQuestionPosition < CharlieQuestions.Length)
+        {
+            PrepareCharlieQuestion();
+            return;
+        }
+        _charlieDebateActive = false;
+        _message = "Debate won. Charlie Kirk returned to the stage.";
+        ResetAnimatronicToStage("charlie-kirk");
+        Invalidate();
+    }
+
     private void WindPuppetMusicBox()
     {
         if (!_monitorOpen || !_cameraMonitorMode || _puppetEscaped || !IsAnimatronicSourceAvailable("puppet") || !_stageAnimatronics.Contains("puppet")) return;
@@ -2508,9 +2677,47 @@ internal sealed class GameForm : Form
         DrawText(g, $"MISSED ANSWERS  {_tennaFailedAnswers} / 3", _smallFont, _muted, tennaPanel.X + 18, tennaPanel.Bottom - 32, tennaPanel.Width - 36, 18, StringAlignment.Center);
     }
 
+    private void DrawCharlieDebate(Graphics g)
+    {
+        using var shade = new SolidBrush(Color.FromArgb(248, 4, 5, 8));
+        g.FillRectangle(shade, 0, 88, DesignWidth, 592);
+        var questionPanel = new RectangleF(42, 112, 890, 526);
+        var charliePanel = new RectangleF(950, 112, 282, 526);
+        DrawPanel(g, questionPanel, Color.FromArgb(18, 15, 24));
+        DrawPanel(g, charliePanel, Color.FromArgb(22, 16, 29));
+        using (var edge = new Pen(_gold, 2))
+        {
+            g.DrawRectangle(edge, questionPanel.X, questionPanel.Y, questionPanel.Width, questionPanel.Height);
+            g.DrawRectangle(edge, charliePanel.X, charliePanel.Y, charliePanel.Width, charliePanel.Height);
+        }
+        var q = CharlieQuestions[_charlieQuestionPosition];
+        DrawText(g, $"QUESTION {_charlieQuestionPosition + 1} / {CharlieQuestions.Length}", _smallFont, _gold, questionPanel.X + 28, questionPanel.Y + 22, 300, 22);
+        DrawText(g, $"TIME 00:{_charlieSecondsRemaining:00}", _smallFont, _red, questionPanel.Right - 190, questionPanel.Y + 22, 160, 22, StringAlignment.Far);
+        DrawLine(g, _edge, 2, questionPanel.X + 24, questionPanel.Y + 58, questionPanel.Right - 24, questionPanel.Y + 58);
+        DrawText(g, q.Prompt, _menuSubtitleFont, _ink, questionPanel.X + 36, questionPanel.Y + 82, questionPanel.Width - 72, 100);
+        var gapX = 18f;
+        var buttonW = (questionPanel.Width - 72 - gapX) / 2;
+        _tennaAnswerRects.Clear();
+        for (var i = 0; i < _charlieShuffledAnswers.Length; i++)
+        {
+            var rect = new RectangleF(questionPanel.X + 36 + i * (buttonW + gapX), questionPanel.Y + 215, buttonW, 118);
+            _tennaAnswerRects[i] = rect;
+            DrawButton(g, rect, _charlieShuffledAnswers[i], ((char)('A' + i)).ToString(), _ink, Color.FromArgb(26, 21, 34), true);
+        }
+        DrawText(g, "ANSWER CORRECTLY BEFORE THE TIMER EXPIRES", _smallFont, _muted,
+            questionPanel.X + 28, questionPanel.Bottom - 34, questionPanel.Width - 56, 18, StringAlignment.Center);
+        DrawText(g, "CHARLIE KIRK", _cardTitleFont, _gold, charliePanel.X + 15, charliePanel.Y + 18, charliePanel.Width - 30, 25, StringAlignment.Center);
+        if (_portraitArt.TryGetValue("charlie-kirk", out var portrait))
+        {
+            var target = FitImage(portrait, new RectangleF(charliePanel.X + 18, charliePanel.Y + 62, charliePanel.Width - 36, 380));
+            g.DrawImage(portrait, target);
+        }
+        DrawText(g, "DEBATE IN PROGRESS", _smallFont, _teal, charliePanel.X + 18, charliePanel.Bottom - 42, charliePanel.Width - 36, 20, StringAlignment.Center);
+    }
+
     private bool WasHandled(Animatronic a) => a.Action switch
     {
-        "door" => IsDoorClosed(a.DoorSide), "foxy" => _leftDoorClosed, "mask" => _maskOn, "lure" => _lureSpent,
+        "door" => IsDoorClosed(a.DoorSide), "foxy" => _leftDoorClosed, "mask" => _maskOn, "mangle" => _maskOn && !_mangleOnCeiling, "lure" => _lureSpent,
         "golden" => _monitorOpen,
         "listen" => _listening && IsDoorClosed(a.DoorSide), "scan" => _ventScanned, _ => false
     };
@@ -2522,10 +2729,14 @@ internal sealed class GameForm : Form
         "door" => $"Movement at the right doorway. Press {KeyLabel(_controlBindings["right-door"])} to close it.",
         "foxy" => $"Foxy is charging from Pirate Cove! Press {KeyLabel(_controlBindings["left-door"])} to shut the left door.",
         "golden" => $"Golden Freddy is in the office! Press {KeyLabel(_controlBindings["monitor"])} to raise the monitor and dismiss him.",
-        "mask" => $"{a.Name} is in the hall. Press {KeyLabel(_controlBindings["mask"])} to put on the mask and stay still.",
+        "mask" => $"{a.Name} is approaching. Press {KeyLabel(_controlBindings["mask"])} to put on the mask and stay still.",
+        "mangle" => $"Mangle is in the Right Air Vent! Put on the Freddy head ({KeyLabel(_controlBindings["mask"])}) before they reach the office.",
+        "debate" => "Charlie Kirk is approaching. Get ready to answer his debate questions.",
         "lure" => $"Springtrap is near. Press {KeyLabel(_controlBindings["lure"])} to use the audio lure while ventilation is stable.",
         "listen" => $"Breathing at the left door. Press {KeyLabel(_controlBindings["listen"])} to listen, then {KeyLabel(_controlBindings["left-door"])} to close the left door.",
-        "scan" => $"Scrap Baby is in the vents. Press {KeyLabel(_controlBindings["scan"])} to scan before she reaches the office.", _ => "Something is moving nearby."
+        "scan" => a.Id.Equals("pee-monster", StringComparison.OrdinalIgnoreCase)
+            ? $"Pee Monster is in the vents! Press {KeyLabel(_controlBindings["scan"])} to scan before he reaches the office."
+            : $"Scrap Baby is in the vents. Press {KeyLabel(_controlBindings["scan"])} to scan before she reaches the office.", _ => "Something is moving nearby."
     };
 
     private Animatronic? CurrentThreat() => _sheets.Animatronics.FirstOrDefault(a => _pendingUntil.TryGetValue(a.Id, out var until) && until > _seconds && !_resolved.Contains(a.Id));
@@ -2533,9 +2744,9 @@ internal sealed class GameForm : Form
     private bool ActionAvailable(string action) => action switch
     {
         "left-door" or "right-door" => true, "left-light" => _leftLightOn || _doorPower > 0, "right-light" => _rightLightOn || _doorPower > 0,
-        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica"), "lure" => _owned.Contains("springtrap"),
+        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica") || _owned.Contains("mangle"), "lure" => _owned.Contains("springtrap"),
         "listen" => _owned.Contains("nightmare-chica") && !_listening && _pendingUntil.TryGetValue("nightmare-chica", out var until) && until > _seconds && !_resolved.Contains("nightmare-chica"),
-        "scan" => _owned.Contains("scrap-baby"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby"), _ => false
+        "scan" => _owned.Contains("scrap-baby") || _owned.Contains("pee-monster"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby") || _owned.Contains("pee-monster"), _ => false
     };
 
     private void UseAction(string action)
@@ -2722,7 +2933,7 @@ internal sealed class GameForm : Form
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
-        if (_tennaQuizActive) return;
+        if (_tennaQuizActive || _charlieDebateActive) return;
         var p = ToDesign(e.Location);
         if (_pendingPurchaseKind != PurchaseKind.None) return;
         if (_prepScreen == PrepScreen.Builder && _catalogViewportRect.Contains(p))
@@ -2758,7 +2969,7 @@ internal sealed class GameForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (_tennaQuizActive) return;
+        if (_tennaQuizActive || _charlieDebateActive) return;
         var p = ToDesign(e.Location);
         if (e.Button == MouseButtons.Left && HandleResultButton(p))
         {
@@ -2801,10 +3012,15 @@ internal sealed class GameForm : Form
             else if (_purchaseCancelRect.Contains(p)) CancelPendingPurchase();
             return;
         }
-        if (_tennaQuizActive)
+        if (_tennaQuizActive || _charlieDebateActive)
         {
             foreach (var (index, rect) in _tennaAnswerRects)
-                if (rect.Contains(p)) { SubmitTennaAnswer(_tennaShuffledAnswers[index]); return; }
+                if (rect.Contains(p))
+                {
+                    if (_tennaQuizActive) SubmitTennaAnswer(_tennaShuffledAnswers[index]);
+                    else SubmitCharlieAnswer(_charlieShuffledAnswers[index]);
+                    return;
+                }
             return;
         }
         if (_nightStarted && _nightOver && HandleResultButton(p)) return;
@@ -3099,7 +3315,7 @@ internal sealed class GameForm : Form
             e.SuppressKeyPress = true;
             return;
         }
-        if (_tennaQuizActive) { e.Handled = true; e.SuppressKeyPress = true; return; }
+        if (_tennaQuizActive || _charlieDebateActive) { e.Handled = true; e.SuppressKeyPress = true; return; }
         if (_waitingForBindingAction is not null)
         {
             BindCapturedKey(e.KeyCode);
