@@ -137,7 +137,7 @@ internal sealed class SourceInstall(GameSource game, string? directory, string? 
     public string? Directory { get; } = directory;
     public string? ExePath { get; } = exePath;
     public Icon? Icon { get; } = icon;
-    public bool IsAvailable => ExePath is not null && File.Exists(ExePath);
+    public bool IsAvailable => Game.Id == "fnaf-mades" || ExePath is not null && File.Exists(ExePath);
     public void Dispose() => Icon?.Dispose();
 }
 

@@ -1,4 +1,5 @@
 using System.Media;
+using NVorbis;
 
 namespace FazbearPizzeria;
 
@@ -28,6 +29,10 @@ internal static class NightSounds
     private static readonly object Sync = new();
     private static string SoundDirectory => Path.Combine(AppContext.BaseDirectory, "sound-bank");
     private static LoadedSound? _menuTheme;
+    private static string? _activeThemeFile;
+    private static int _musicVolume = 100;
+    private static int _effectsVolume = 100;
+    private static int _activeThemeVolume = -1;
     private static System.Threading.Timer? _victoryTimer;
     private static System.Threading.Timer? _ambienceResumeTimer;
     private static LoadedSound? _activeEffect;
@@ -35,19 +40,36 @@ internal static class NightSounds
     private static bool _ambienceRequested;
     private static int _effectGeneration;
 
-    public static void StartMenuMusic()
+    public static void SetVolumes(int music, int effects)
     {
         lock (Sync)
         {
+            _musicVolume = Math.Clamp(music, 0, 100);
+            _effectsVolume = Math.Clamp(effects, 0, 100);
+        }
+    }
+
+    public static void StartMenuMusic()
+    {
+        StartTheme("main menu theme.wav");
+    }
+
+    public static void StartTheme(string file)
+    {
+        lock (Sync)
+        {
+            if (_activeThemeFile?.Equals(file, StringComparison.OrdinalIgnoreCase) == true && _activeThemeVolume == _musicVolume && _menuTheme is not null) return;
             _victoryTimer?.Dispose();
             _victoryTimer = null;
             StopMenuMusicCore();
             try
             {
-                _menuTheme = Load("main menu theme.wav", 1);
+                _menuTheme = Load(file, _musicVolume / 100.0);
+                _activeThemeFile = _menuTheme is null ? null : file;
+                _activeThemeVolume = _menuTheme is null ? -1 : _musicVolume;
                 _menuTheme?.Player.PlayLooping();
             }
-            catch (Exception) { _menuTheme = null; }
+            catch (Exception) { _menuTheme = null; _activeThemeFile = null; _activeThemeVolume = -1; }
         }
     }
 
@@ -65,6 +87,8 @@ internal static class NightSounds
     {
         try { _menuTheme?.Player.Stop(); } catch (Exception) { }
         _menuTheme = null;
+        _activeThemeFile = null;
+        _activeThemeVolume = -1;
     }
 
     public static void Play(string cue)
@@ -74,7 +98,7 @@ internal static class NightSounds
             lock (Sync)
             {
                 if (!Effects.TryGetValue(cue, out var file)) return;
-                var sound = Load(file, 1);
+                var sound = Load(file, _effectsVolume / 100.0);
                 if (sound is null) return;
                 _ambienceResumeTimer?.Dispose();
                 _ambienceResumeTimer = null;
@@ -196,7 +220,8 @@ internal static class NightSounds
         {
             if (File.Exists(officePath) && File.Exists(fanPath))
             {
-                var wave = MixAmbience(File.ReadAllBytes(officePath), File.ReadAllBytes(fanPath), .30, .12);
+                var gain = _effectsVolume / 100.0;
+                var wave = MixAmbience(File.ReadAllBytes(officePath), File.ReadAllBytes(fanPath), .30 * gain, .12 * gain);
                 var stream = new MemoryStream(wave, writable: false);
                 mixed = new LoadedSound(new SoundPlayer(stream), stream);
                 mixed.Player.Load();
@@ -208,7 +233,7 @@ internal static class NightSounds
             try { mixed.Player.PlayLooping(); AmbiencePlayers.Add(mixed); return; }
             catch (Exception) { }
         }
-        StartLoop("office ambience2.wav", .30);
+        StartLoop("office ambience2.wav", .30 * _effectsVolume / 100.0);
     }
 
     private static byte[] MixAmbience(byte[] office, byte[] fan, double officeGain, double fanGain)
@@ -290,13 +315,50 @@ internal static class NightSounds
         var path = Path.Combine(SoundDirectory, file);
         if (!File.Exists(path)) return null;
         var bytes = File.ReadAllBytes(path);
-        if (gain < 1) ApplyPcmGain(bytes, gain);
+        if (bytes.AsSpan().StartsWith("OggS"u8)) bytes = DecodeOggToWave(bytes, gain);
+        else if (gain < 1) ApplyPcmGain(bytes, gain);
         var stream = new MemoryStream(bytes, writable: false);
         var player = new SoundPlayer(stream);
         player.Load();
         loaded = new LoadedSound(player, stream);
         Players[key] = loaded;
         return loaded;
+    }
+
+    private static byte[] DecodeOggToWave(byte[] ogg, double gain)
+    {
+        using var input = new MemoryStream(ogg, writable: false);
+        using var decoder = new VorbisReader(input, closeOnDispose: false);
+        var channels = decoder.Channels;
+        var sampleRate = decoder.SampleRate;
+        if (channels is < 1 or > 2 || sampleRate < 8000) throw new InvalidDataException("Unsupported OGG audio format.");
+
+        using var pcm = new MemoryStream();
+        using (var writer = new BinaryWriter(pcm, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            var samples = new float[8192];
+            int count;
+            while ((count = decoder.ReadSamples(samples, 0, samples.Length)) > 0)
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    var value = Math.Clamp(samples[i] * gain, -1f, 1f);
+                    writer.Write((short)Math.Clamp((int)Math.Round(value * (value < 0 ? 32768 : 32767)), short.MinValue, short.MaxValue));
+                }
+            }
+        }
+
+        using var wave = new MemoryStream(44 + (int)pcm.Length);
+        using (var writer = new BinaryWriter(wave, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); writer.Write(36 + (int)pcm.Length);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt ")); writer.Write(16); writer.Write((short)1);
+            writer.Write((short)channels); writer.Write(sampleRate); writer.Write(sampleRate * channels * 2);
+            writer.Write((short)(channels * 2)); writer.Write((short)16);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("data")); writer.Write((int)pcm.Length);
+            pcm.Position = 0; pcm.CopyTo(wave);
+        }
+        return wave.ToArray();
     }
 
     private static void ApplyPcmGain(byte[] wave, double gain)

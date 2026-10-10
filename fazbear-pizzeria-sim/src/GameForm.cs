@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Text.Json;
+using System.Drawing.Imaging;
 
 namespace FazbearPizzeria;
 
@@ -11,10 +12,12 @@ internal sealed class GameForm : Form
     private readonly Dictionary<string, SourceInstall> _sources;
     private readonly Dictionary<string, Bitmap?> _sourceArt = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Bitmap> _portraitArt = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Image> _jumpscareArt = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Bitmap> _catalogAttractionArt = new(StringComparer.OrdinalIgnoreCase);
     private Bitmap? _tennaModelArt;
     private readonly HashSet<string> _owned = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _unlockedAnimatronicGames = new(StringComparer.OrdinalIgnoreCase) { "fnaf1", "ucn" };
+    private readonly HashSet<string> _unlockedAnimatronicGames = new(StringComparer.OrdinalIgnoreCase) { "fnaf1" };
+    private readonly HashSet<string> _purchasedCatalogCategories = new(StringComparer.OrdinalIgnoreCase) { "dumpster" };
     private readonly HashSet<string> _stageAnimatronics = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _builtAttractions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Point> _placedAttractions = new(StringComparer.OrdinalIgnoreCase);
@@ -41,6 +44,14 @@ internal sealed class GameForm : Form
     private readonly System.Windows.Forms.Timer _jumpscareTimer = new() { Interval = 1100 };
     private readonly Random _random = new(41);
     private readonly string[] _sourceOrder = ["fnaf1", "fnaf2", "fnaf3", "fnaf4", "ffps", "ucn"];
+    private static readonly HashSet<string> CatalogCategoryIds = new(StringComparer.OrdinalIgnoreCase) { "dumpster", "budget-tech", "smiles", "rare" };
+    private static readonly (string Id, string Name, int Cost)[] CatalogCategories =
+    [
+        ("dumpster", "DUMPSTER DIVER WEEKLY", 0),
+        ("budget-tech", "STAN'S BUDGET TECH", 500),
+        ("smiles", "SMILES AND SERVOS, INC.", 1500),
+        ("rare", "RARE FINDS AUCTION", 3000)
+    ];
     private int _funds;
     private int _day = 1;
     private int _seconds;
@@ -58,6 +69,7 @@ internal sealed class GameForm : Form
     private int _payoutAnimatronicBonusCollected;
     private int _konamiIndex;
     private int _nightSkipCheatIndex;
+    private int _unlockCategoriesCheatIndex;
     private DateTime _cheatToastUntilUtc;
     private string _cheatToastMessage = "CHEAT ACCEPTED · +$1,000";
     private string? _selectedAttraction;
@@ -71,6 +83,9 @@ internal sealed class GameForm : Form
     private bool _cameraMonitorMode;
     private bool _goldenFreddyReady;
     private bool _goldenFreddyEncounterTriggered;
+    private int _puppetMusicBox = 100;
+    private bool _puppetEscaped;
+    private RectangleF _puppetWindRect;
     private bool _tennaQuizActive;
     private int _tennaQuestionPosition;
     private int _tennaCorrectAnswers;
@@ -101,6 +116,13 @@ internal sealed class GameForm : Form
     private bool _settingsOpen;
     private bool _showRatingGuide;
     private bool _isFullscreen = true;
+    private int _musicVolume = 100;
+    private int _effectsVolume = 100;
+    private bool _autoLaunchOnSignIn;
+    private RectangleF _musicVolumeRect;
+    private RectangleF _effectsVolumeRect;
+    private RectangleF _displayModeRect;
+    private RectangleF _autoLaunchRect;
     private Rectangle _windowedBounds;
     private PrepScreen _prepScreen = PrepScreen.Builder;
     private string _message = "Choose a stage lineup for tonight.";
@@ -200,6 +222,7 @@ internal sealed class GameForm : Form
     private static readonly (string Id, string Name)[] FnafCameras =
     [
         ("1A", "SHOW STAGE"), ("1B", "DINING AREA"), ("1C", "PIRATE COVE"),
+        ("10", "GAME AREA"),
         ("2A", "WEST HALL"), ("2B", "WEST CORNER"), ("3", "SUPPLY CLOSET"),
         ("4A", "EAST HALL"), ("4B", "EAST CORNER"), ("5", "BACKSTAGE"),
         ("6", "KITCHEN"), ("7", "RESTROOMS")
@@ -212,6 +235,8 @@ internal sealed class GameForm : Form
         ["bonnie"] = ["1A", "1B", "2A", "2B"],
         ["chica"] = ["1A", "1B", "7", "4A", "4B"],
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
+        ["toy-freddy"] = ["1A", "10", "2A", "2B"],
+        ["puppet"] = ["1A"],
         ["springtrap"] = ["1A", "5", "3", "2A", "2B"],
         ["nightmare-chica"] = ["1A", "1B", "6", "2A", "2B"],
         ["scrap-baby"] = ["1A", "5", "7", "V1"]
@@ -231,17 +256,20 @@ internal sealed class GameForm : Form
     private int _pendingDeleteSlot = -1;
     private bool _saveMenuOpen;
 
+    private sealed record GamePreferences(int MusicVolume = 100, int EffectsVolume = 100,
+        bool Fullscreen = true, bool AutoLaunchOnSignIn = false);
+
     private enum PrepScreen { Builder, Blueprint, Roster }
-    private enum PurchaseKind { None, Attraction, Animatronic, AnimatronicCategory }
+    private enum PurchaseKind { None, Attraction, Animatronic, AnimatronicCategory, CatalogCategory }
     private sealed record DayStartSnapshot(int Day, int Funds, string[] OwnedAnimatronics, string[] StagedAnimatronics,
         string[] BuiltAttractions, Dictionary<string, int> AttractionTiles, Dictionary<string, int> AiLevels,
-        string[] UnlockedAnimatronicGames, int PayoutPaidDay, int LawsuitCheckedDay);
+        string[] UnlockedAnimatronicGames, int PayoutPaidDay, int LawsuitCheckedDay, string[]? PurchasedCatalogCategories = null);
     private sealed record SaveGameData(int Version, DateTime SavedAt, int Day, int Funds, string[] OwnedAnimatronics,
         string[] StagedAnimatronics, string[] BuiltAttractions, Dictionary<string, int> AttractionTiles,
         Dictionary<string, int> AiLevels, string[] UnlockedAnimatronicGames, int PayoutPaidDay, int LawsuitCheckedDay,
         int PrepScreen, bool NightOver, bool NightWon, int PayoutCollectedThisNight, int LawsuitsThisShift, int LawsuitFeesThisShift,
         int AiPayoutBonus = 0, DayStartSnapshot? DayStartState = null, int NightStrikes = 0, bool DayResetByDeath = false,
-        int AnimatronicPayoutBonus = 0);
+        int AnimatronicPayoutBonus = 0, string[]? PurchasedCatalogCategories = null);
     private DayStartSnapshot? _dayStartSnapshot;
 
     public GameForm(DesignSheets sheets, Dictionary<string, SourceInstall> sources, bool demo)
@@ -250,6 +278,7 @@ internal sealed class GameForm : Form
         _sources = sources;
         _demo = demo;
         _funds = sheets.StartingFunds;
+        LoadPreferences();
         // Freddy is the starter character; $200 remains available for the first attraction.
         _owned.Add("freddy");
         foreach (var a in sheets.Animatronics) _ai[a.Id] = sheets.DefaultAiLevel;
@@ -279,6 +308,10 @@ internal sealed class GameForm : Form
             if (!File.Exists(path)) continue;
             try { using var image = Image.FromFile(path); _portraitArt[a.Id] = new Bitmap(image); } catch { }
         }
+        var jumpscareDirectory = Path.Combine(AppContext.BaseDirectory, "assets", "jumpscares");
+        if (Directory.Exists(jumpscareDirectory))
+        foreach (var path in Directory.GetFiles(jumpscareDirectory).Where(path => Path.GetExtension(path).Equals(".gif", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)))
+            try { _jumpscareArt[Path.GetFileNameWithoutExtension(path)] = Image.FromFile(path); } catch { }
         var tennaModelPath = Path.Combine(portraitDirectory, "mr-ant-tenna-model.png");
         if (File.Exists(tennaModelPath))
             try { using var image = Image.FromFile(tennaModelPath); _tennaModelArt = new Bitmap(image); } catch { }
@@ -290,8 +323,9 @@ internal sealed class GameForm : Form
             try { using var image = Image.FromFile(path); _catalogAttractionArt[attraction.Id] = new Bitmap(image); } catch { }
         }
         Text = "Fazbear Pizzeria After Hours";
-        FormBorderStyle = FormBorderStyle.None;
-        WindowState = FormWindowState.Maximized;
+        FormBorderStyle = _isFullscreen ? FormBorderStyle.None : FormBorderStyle.Sizable;
+        WindowState = _isFullscreen ? FormWindowState.Maximized : FormWindowState.Normal;
+        if (!_isFullscreen) Size = new Size(1280, 720);
         MinimumSize = new Size(800, 600);
         BackColor = Color.FromArgb(5, 8, 9);
         DoubleBuffered = true;
@@ -302,6 +336,8 @@ internal sealed class GameForm : Form
         _jumpscareTimer.Tick += (_, _) =>
         {
             _jumpscareTimer.Stop();
+            if (_jumpscareAnimatronicId is not null && _jumpscareArt.TryGetValue(_jumpscareAnimatronicId, out var scareImage))
+                ImageAnimator.StopAnimate(scareImage, OnJumpscareFrameChanged);
             _jumpscareActive = false;
             FinishNight(false, died: true);
         };
@@ -331,6 +367,13 @@ internal sealed class GameForm : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
+        if (!_nightStarted)
+        {
+            if (_settingsOpen || _saveMenuOpen) NightSounds.StartTheme("settings and saves screen theme.wav");
+            else if (_showMenu) NightSounds.StartMenuMusic();
+            else if (_prepScreen == PrepScreen.Blueprint) NightSounds.StartTheme("blue print mode theme.wav");
+            else NightSounds.StartTheme("catalogs theme.wav");
+        }
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
@@ -488,9 +531,34 @@ internal sealed class GameForm : Form
             _settingsBindingRects[action] = bind;
             DrawButton(g, bind, _waitingForBindingAction == action ? "PRESS KEY" : KeyLabel(_controlBindings[action]), "↵", _waitingForBindingAction == action ? _gold : _teal, Color.FromArgb(13, 20, 21), true);
         }
+        DrawText(g, "AUDIO", _smallFont, _gold, 730, 190, 450, 20);
+        DrawVolumeSetting(g, "MUSIC", _musicVolume, 730, 226, out _musicVolumeRect);
+        DrawVolumeSetting(g, "SOUND EFFECTS", _effectsVolume, 730, 314, out _effectsVolumeRect);
+        DrawText(g, "STARTUP DISPLAY", _smallFont, _gold, 730, 407, 450, 20);
+        _displayModeRect = new RectangleF(730, 433, 450, 42);
+        DrawButton(g, _displayModeRect, "DISPLAY MODE", _isFullscreen ? "FULLSCREEN" : "WINDOWED", _teal, Color.FromArgb(13, 20, 21), true);
+        DrawText(g, "WINDOWS STARTUP", _smallFont, _gold, 730, 496, 450, 20);
+        _autoLaunchRect = new RectangleF(730, 522, 450, 42);
+        DrawButton(g, _autoLaunchRect, "LAUNCH ON SIGN-IN", _autoLaunchOnSignIn ? "ON" : "OFF", _autoLaunchOnSignIn ? _teal : _muted, Color.FromArgb(13, 20, 21), true);
         _settingsBackRect = new RectangleF(88, 625, 260, 42);
         DrawButton(g, _settingsBackRect, "BACK TO MENU", "←", _gold, Color.FromArgb(47, 35, 19), true);
         DrawText(g, "F11  WINDOWED / FULLSCREEN", _smallFont, Color.FromArgb(106, 115, 110), 1010, 694, 220, 18, StringAlignment.Far);
+    }
+
+    private void DrawVolumeSetting(Graphics g, string label, int volume, float x, float y, out RectangleF slider)
+    {
+        DrawText(g, label, _smallFont, _ink, x, y, 320, 18);
+        DrawText(g, $"{volume}%", _smallFont, _teal, x + 370, y, 80, 18, StringAlignment.Far);
+        slider = new RectangleF(x, y + 25, 450, 22);
+        using var track = new SolidBrush(Color.FromArgb(30, 38, 37));
+        using var fill = new SolidBrush(Color.FromArgb(190, _teal));
+        using var edge = new Pen(Color.FromArgb(76, _teal));
+        g.FillRectangle(track, slider);
+        g.FillRectangle(fill, slider.X, slider.Y, slider.Width * volume / 100f, slider.Height);
+        g.DrawRectangle(edge, slider.X, slider.Y, slider.Width, slider.Height);
+        var knobX = slider.X + slider.Width * volume / 100f;
+        using var knob = new SolidBrush(_ink);
+        g.FillEllipse(knob, knobX - 6, slider.Y - 3, 12, slider.Height + 6);
     }
 
     private static string ControlName(string action) => action switch
@@ -507,6 +575,57 @@ internal sealed class GameForm : Form
     };
 
     private static string ControlSettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FazbearPizzeriaAfterHours", "controls.json");
+    private static string PreferencesPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FazbearPizzeriaAfterHours", "settings.json");
+    private const string StartupRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string StartupValueName = "FazbearPizzeriaAfterHours";
+
+    private void LoadPreferences()
+    {
+        try
+        {
+            if (!File.Exists(PreferencesPath)) return;
+            var preferences = JsonSerializer.Deserialize<GamePreferences>(File.ReadAllText(PreferencesPath));
+            if (preferences is null) return;
+            _musicVolume = Math.Clamp(preferences.MusicVolume, 0, 100);
+            _effectsVolume = Math.Clamp(preferences.EffectsVolume, 0, 100);
+            _isFullscreen = preferences.Fullscreen;
+            _autoLaunchOnSignIn = preferences.AutoLaunchOnSignIn;
+            NightSounds.SetVolumes(_musicVolume, _effectsVolume);
+        }
+        catch { }
+    }
+
+    private void SavePreferences()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(PreferencesPath)!;
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(PreferencesPath, JsonSerializer.Serialize(new GamePreferences(_musicVolume, _effectsVolume, _isFullscreen, _autoLaunchOnSignIn)));
+        }
+        catch { _settingsMessage = "Could not save settings; they may reset next launch."; }
+    }
+
+    private void SetAutoLaunchOnSignIn(bool enabled)
+    {
+        try
+        {
+            using var runKey = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(StartupRunKey, writable: true);
+            if (enabled)
+            {
+                var executable = Environment.ProcessPath ?? Application.ExecutablePath;
+                runKey.SetValue(StartupValueName, $"\"{executable}\"");
+            }
+            else runKey.DeleteValue(StartupValueName, throwOnMissingValue: false);
+            _autoLaunchOnSignIn = enabled;
+            SavePreferences();
+            _settingsMessage = enabled ? "The game will launch when you sign in to Windows." : "Automatic Windows sign-in launch is off.";
+        }
+        catch
+        {
+            _settingsMessage = "Windows could not update the launch-at-sign-in setting.";
+        }
+    }
 
     private void LoadControlBindings()
     {
@@ -548,7 +667,7 @@ internal sealed class GameForm : Form
             try
             {
                 var slot = JsonSerializer.Deserialize<SaveGameData>(File.ReadAllText(path));
-                if (slot is { Version: 1, OwnedAnimatronics: not null, StagedAnimatronics: not null,
+                if (slot is { Version: >= 1, OwnedAnimatronics: not null, StagedAnimatronics: not null,
                     BuiltAttractions: not null, AttractionTiles: not null, AiLevels: not null,
                     UnlockedAnimatronicGames: not null }) _saveSlots[i] = slot;
             }
@@ -574,7 +693,8 @@ internal sealed class GameForm : Form
         _owned.Clear();
         _owned.Add("freddy");
         _unlockedAnimatronicGames.Clear();
-        _unlockedAnimatronicGames.UnionWith(["fnaf1", "ucn"]);
+        _unlockedAnimatronicGames.Add("fnaf1");
+        _purchasedCatalogCategories.Clear(); _purchasedCatalogCategories.Add("dumpster");
         _stageAnimatronics.Clear();
         _builtAttractions.Clear();
         _placedAttractions.Clear();
@@ -634,8 +754,11 @@ internal sealed class GameForm : Form
         foreach (var animatronic in _sheets.Animatronics)
             _ai[animatronic.Id] = Math.Clamp(data.AiLevels is not null && data.AiLevels.TryGetValue(animatronic.Id, out var level) ? level : _sheets.DefaultAiLevel, 0, _sheets.MaximumAiLevel);
         _unlockedAnimatronicGames.Clear();
-        _unlockedAnimatronicGames.UnionWith(["fnaf1", "ucn"]);
-        _unlockedAnimatronicGames.UnionWith((data.UnlockedAnimatronicGames ?? []).Where(id => _sheets.Games.Any(game => game.Id == id)));
+        _unlockedAnimatronicGames.Add("fnaf1");
+        var savedCategoryIds = (data.UnlockedAnimatronicGames ?? []).Where(id => _sheets.Games.Any(game => game.Id == id));
+        _unlockedAnimatronicGames.UnionWith(savedCategoryIds.Where(id => !(id == "ucn" && data.Version < 2)));
+        _purchasedCatalogCategories.Clear(); _purchasedCatalogCategories.Add("dumpster");
+        _purchasedCatalogCategories.UnionWith((data.PurchasedCatalogCategories ?? []).Where(CatalogCategoryIds.Contains));
         _dayStartSnapshot = data.DayStartState;
         _prepScreen = Enum.IsDefined(typeof(PrepScreen), data.PrepScreen) ? (PrepScreen)data.PrepScreen : PrepScreen.Builder;
         _nightOver = data.NightOver;
@@ -661,14 +784,15 @@ internal sealed class GameForm : Form
             Directory.CreateDirectory(directory);
             var path = SaveSlotPath(_activeSaveSlot);
             var temporary = path + ".tmp";
-            var data = new SaveGameData(1, DateTime.UtcNow, _day, _funds,
+            var data = new SaveGameData(2, DateTime.UtcNow, _day, _funds,
                 _owned.Order(StringComparer.OrdinalIgnoreCase).ToArray(), _stageAnimatronics.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
                 _builtAttractions.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
                 _placedAttractions.ToDictionary(pair => pair.Key, pair => pair.Value.Y * 8 + pair.Value.X, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, int>(_ai, StringComparer.OrdinalIgnoreCase),
                 _unlockedAnimatronicGames.Order(StringComparer.OrdinalIgnoreCase).ToArray(), _payoutPaidDay, _lawsuitCheckedDay,
                 (int)_prepScreen, _nightOver, _nightWon, _payoutCollectedThisNight, _lawsuitsThisShift, _lawsuitFeesThisShift,
-                _payoutAiBonusCollected, _dayStartSnapshot, _strikes, _dayResetByDeath, _payoutAnimatronicBonusCollected);
+                _payoutAiBonusCollected, _dayStartSnapshot, _strikes, _dayResetByDeath, _payoutAnimatronicBonusCollected,
+                _purchasedCatalogCategories.Order(StringComparer.OrdinalIgnoreCase).ToArray());
             File.WriteAllText(temporary, JsonSerializer.Serialize(data));
             File.Move(temporary, path, true);
             RefreshSaveSlots();
@@ -685,7 +809,8 @@ internal sealed class GameForm : Form
             _builtAttractions.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
             _placedAttractions.ToDictionary(pair => pair.Key, pair => pair.Value.Y * 8 + pair.Value.X, StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, int>(_ai, StringComparer.OrdinalIgnoreCase),
-            _unlockedAnimatronicGames.Order(StringComparer.OrdinalIgnoreCase).ToArray(), _payoutPaidDay, _lawsuitCheckedDay);
+            _unlockedAnimatronicGames.Order(StringComparer.OrdinalIgnoreCase).ToArray(), _payoutPaidDay, _lawsuitCheckedDay,
+            _purchasedCatalogCategories.Order(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
     private void RestoreDayStartSnapshot()
@@ -710,8 +835,10 @@ internal sealed class GameForm : Form
         _ai.Clear();
         foreach (var animatronic in _sheets.Animatronics)
             _ai[animatronic.Id] = Math.Clamp(snapshot.AiLevels.TryGetValue(animatronic.Id, out var level) ? level : _sheets.DefaultAiLevel, 0, _sheets.MaximumAiLevel);
-        _unlockedAnimatronicGames.Clear(); _unlockedAnimatronicGames.UnionWith(["fnaf1", "ucn"]);
+        _unlockedAnimatronicGames.Clear(); _unlockedAnimatronicGames.Add("fnaf1");
         _unlockedAnimatronicGames.UnionWith(snapshot.UnlockedAnimatronicGames.Where(id => _sheets.Games.Any(game => game.Id == id)));
+        _purchasedCatalogCategories.Clear(); _purchasedCatalogCategories.Add("dumpster");
+        _purchasedCatalogCategories.UnionWith((snapshot.PurchasedCatalogCategories ?? []).Where(CatalogCategoryIds.Contains));
         _payoutCollectedThisNight = 0;
         _payoutAiBonusCollected = 0;
         _payoutAnimatronicBonusCollected = 0;
@@ -797,26 +924,18 @@ internal sealed class GameForm : Form
         DrawText(g, "THE CATALOG", _titleFont, _ink, 48, 141, 700, 34);
         var rating = PizzeriaRating();
         var points = rating.Atmosphere + rating.HealthSafety + rating.Entertainment + rating.BonusRevenue;
-        DrawText(g, $"Pizzeria rating {points} · Attractions are bought with available cash; click BUY and confirm. Rating unlocks better catalogs.", _bodyFont, _muted, 50, 178, 1172, 24);
-        var categories = new[]
-        {
-            (Id: "dumpster", Name: "DUMPSTER DIVER WEEKLY", Required: 0),
-            (Id: "budget-tech", Name: "STAN'S BUDGET TECH", Required: 6),
-            (Id: "smiles", Name: "SMILES AND SERVOS, INC.", Required: 15),
-            (Id: "rare", Name: "RARE FINDS AUCTION", Required: 30)
-        };
+        DrawText(g, $"Pizzeria rating {points} · Buy catalog access with available cash, then purchase individual attractions.", _bodyFont, _muted, 50, 178, 1172, 24);
         _catalogCategoryRects.Clear();
-        for (var i = 0; i < categories.Length; i++)
+        for (var i = 0; i < CatalogCategories.Length; i++)
         {
-            var category = categories[i];
+            var category = CatalogCategories[i];
             var rect = new RectangleF(48 + i * 296, 207, 284, 32);
             _catalogCategoryRects[category.Id] = rect;
-            var unlocked = IsCatalogCategoryUnlocked(category.Id, points);
-            var label = unlocked ? category.Name : $"LOCKED · {category.Required} PTS";
-            DrawButton(g, rect, label, unlocked ? category.Id == _selectedCatalogCategory ? "✓" : "→" : "×", !unlocked ? _muted : category.Id == _selectedCatalogCategory ? _gold : _teal, category.Id == _selectedCatalogCategory ? Color.FromArgb(47, 35, 19) : _panel, unlocked);
+            var unlocked = IsCatalogCategoryUnlocked(category.Id);
+            var label = unlocked ? category.Name : $"LOCKED · ${category.Cost:N0}";
+            DrawButton(g, rect, label, unlocked ? category.Id == _selectedCatalogCategory ? "✓" : "→" : "BUY", !unlocked ? _muted : category.Id == _selectedCatalogCategory ? _gold : _teal, category.Id == _selectedCatalogCategory ? Color.FromArgb(47, 35, 19) : _panel, unlocked || _funds >= category.Cost);
         }
-        var selectedCategory = categories.FirstOrDefault(category => category.Id == _selectedCatalogCategory);
-        if (selectedCategory.Id is null || points < selectedCategory.Required) _selectedCatalogCategory = "dumpster";
+        if (!IsCatalogCategoryUnlocked(_selectedCatalogCategory)) _selectedCatalogCategory = "dumpster";
         var items = _sheets.Attractions.Where(attraction => attraction.Category == _selectedCatalogCategory).ToArray();
         _catalogViewportRect = new RectangleF(48, 247, 1174, 351);
         _catalogContentHeight = items.Length * 82;
@@ -836,8 +955,10 @@ internal sealed class GameForm : Form
             DrawText(g, $"+${AttractionPayout(attraction):N0} / SHIFT", _smallFont, _gold, card.Right - 330, card.Y + 15, 172, 30, StringAlignment.Center);
             var buy = new RectangleF(card.Right - 146, card.Y + 15, 132, 42);
             _attractionBuyRects[attraction.Id] = buy;
-            var canBuy = !_builtAttractions.Contains(attraction.Id) && _funds >= attraction.Cost;
-            DrawButton(g, buy, _builtAttractions.Contains(attraction.Id) ? "BUILT" : canBuy ? "BUY WITH CASH" : "NEED CASH", _builtAttractions.Contains(attraction.Id) ? "✓" : canBuy ? $"${attraction.Cost:N0}" : "—", canBuy ? _teal : _muted, Color.FromArgb(13, 28, 28), canBuy);
+            var replaced = IsTablewareUpgradeSuperseded(attraction.Id);
+            var canBuy = !_builtAttractions.Contains(attraction.Id) && !replaced && _funds >= attraction.Cost;
+            var stateLabel = _builtAttractions.Contains(attraction.Id) ? "BUILT" : replaced ? "REPLACED" : "BUY";
+            DrawButton(g, buy, stateLabel, _builtAttractions.Contains(attraction.Id) ? "✓" : $"${attraction.Cost:N0}", canBuy ? _teal : _muted, Color.FromArgb(13, 28, 28), canBuy);
         }
         g.Restore(state);
         _catalogScrollTrackRect = new RectangleF(1227, _catalogViewportRect.Y, 7, _catalogViewportRect.Height);
@@ -902,7 +1023,7 @@ internal sealed class GameForm : Form
         }
         DrawDiningTable(g, 1, 1, cellW, cellH);
         DrawDiningTable(g, 4, 1, cellW, cellH);
-        DrawText(g, "FIXED TABLES · PAPER CUPS AUTO-FIT BOTH · STATION SITS BY THE STAGE", _smallFont, _muted, floor.X + 16, floor.Bottom - 30, floor.Width - 32, 20);
+        DrawText(g, "FIXED TABLES · TABLEWARE SET FITS BOTH · STATION BY STAGE", _smallFont, _muted, floor.X + 16, floor.Bottom - 30, floor.Width - 32, 20);
         if (_builtAttractions.Contains("sanitation-station"))
         {
             var station = new RectangleF(stage.Right + 7, stage.Y + 2, 38, 34);
@@ -916,7 +1037,7 @@ internal sealed class GameForm : Form
         DrawButton(g, _ratingGuideButtonRect, "RATING GUIDE", "?", _teal, Color.FromArgb(13, 28, 28), true);
         _blueprintInventoryRects.Clear();
         DrawText(g, "UNPLACED PURCHASES · CLICK A FLOOR TILE", _smallFont, _muted, side.X + 16, side.Y + 37, side.Width - 38, 18);
-        var purchased = _sheets.Attractions.Where(a => _builtAttractions.Contains(a.Id) && !IsAttractionEffectivelyPlaced(a)).ToArray();
+        var purchased = _sheets.Attractions.Where(a => _builtAttractions.Contains(a.Id) && !IsAttractionEffectivelyPlaced(a) && !IsTablewareUpgradeSuperseded(a.Id)).ToArray();
         _blueprintInventoryViewportRect = new RectangleF(side.X + 12, side.Y + 58, side.Width - 30, 210);
         var inventoryContentHeight = purchased.Length * 48;
         _blueprintInventoryScrollOffset = Math.Clamp(_blueprintInventoryScrollOffset, 0, Math.Max(0, inventoryContentHeight - (int)_blueprintInventoryViewportRect.Height));
@@ -961,14 +1082,36 @@ internal sealed class GameForm : Form
         g.DrawRectangle(edge, table.X, table.Y, table.Width, table.Height);
         DrawText(g, "DINING TABLE", _smallFont, _ink, table.X + 1, table.Y + 3, table.Width - 2, 12, StringAlignment.Center);
         if (_builtAttractions.Contains("paper-cups"))
-            DrawAttractionIcon(g, "cups", new RectangleF(table.X + 19, table.Y + 14, table.Width - 38, table.Height - 16), false, "paper-cups");
+        {
+            var setId = _builtAttractions.Contains("neon-party-set") ? "neon-party-set"
+                : _builtAttractions.Contains("foil-party-set") ? "foil-party-set" : "paper-cups";
+            var set = _sheets.Attractions.FirstOrDefault(item => item.Id == setId);
+            var style = set?.Style ?? "cups";
+            DrawAttractionIcon(g, style, new RectangleF(table.X + 19, table.Y + 14, table.Width - 38, table.Height - 16), false, setId);
+        }
+        else if (_builtAttractions.Contains("neon-party-set") || _builtAttractions.Contains("foil-party-set"))
+        {
+            var setId = _builtAttractions.Contains("neon-party-set") ? "neon-party-set" : "foil-party-set";
+            var set = _sheets.Attractions.First(item => item.Id == setId);
+            DrawAttractionIcon(g, set.Style, new RectangleF(table.X + 19, table.Y + 14, table.Width - 38, table.Height - 16), false, setId);
+        }
     }
 
     private static bool IsDiningTableTile(Point cell) => cell.Y == 1 && cell.X is 1 or 2 or 4 or 5;
 
-    private bool IsAttractionEffectivelyPlaced(Attraction attraction) =>
-        _placedAttractions.ContainsKey(attraction.Id) ||
-        (_builtAttractions.Contains(attraction.Id) && attraction.Id is "paper-cups" or "sanitation-station");
+    private bool IsAttractionEffectivelyPlaced(Attraction attraction)
+    {
+        if (!_builtAttractions.Contains(attraction.Id)) return false;
+        var upgradedTableware = _builtAttractions.Contains("neon-party-set") || _builtAttractions.Contains("foil-party-set");
+        if (attraction.Id == "paper-cups") return !upgradedTableware;
+        if (attraction.Id == "foil-party-set") return !_builtAttractions.Contains("neon-party-set");
+        if (attraction.Id is "sanitation-station" or "foil-party-set" or "neon-party-set") return true;
+        return _placedAttractions.ContainsKey(attraction.Id);
+    }
+
+    private bool IsTablewareUpgradeSuperseded(string id) =>
+        id == "paper-cups" && (_builtAttractions.Contains("foil-party-set") || _builtAttractions.Contains("neon-party-set")) ||
+        id == "foil-party-set" && _builtAttractions.Contains("neon-party-set");
 
     private (int Atmosphere, int HealthSafety, int Entertainment, int BonusRevenue, int LiabilityRisk) PizzeriaRating()
     {
@@ -982,19 +1125,12 @@ internal sealed class GameForm : Form
             Math.Max(0, placed.Sum(a => a.LiabilityRisk) - placed.Sum(a => a.HealthSafety) - performers.Sum(a => a.HealthSafety)));
     }
 
-    private static int CatalogRequirement(string category) => category switch
-    {
-        "dumpster" => 0, "budget-tech" => 6, "smiles" => 15, "rare" => 30, _ => int.MaxValue
-    };
+    private static int CatalogCategoryCost(string category) => CatalogCategories.FirstOrDefault(entry => entry.Id.Equals(category, StringComparison.OrdinalIgnoreCase)).Cost;
 
     private int AnimatronicCategoryCost(string gameId) =>
         _sheets.Games.FirstOrDefault(game => game.Id.Equals(gameId, StringComparison.OrdinalIgnoreCase))?.AnimatronicUnlockCost ?? int.MaxValue;
 
-    private bool IsCatalogCategoryUnlocked(string category, int? points = null)
-    {
-        var rating = PizzeriaRating();
-        return (points ?? (rating.Atmosphere + rating.HealthSafety + rating.Entertainment + rating.BonusRevenue)) >= CatalogRequirement(category);
-    }
+    private bool IsCatalogCategoryUnlocked(string category, int? points = null) => _purchasedCatalogCategories.Contains(category);
 
     private void DrawRatingGuide(Graphics g)
     {
@@ -1164,8 +1300,8 @@ internal sealed class GameForm : Form
             DrawPanel(g, header, collapsed ? Color.FromArgb(23, 18, 25) : Color.FromArgb(42, 27, 43));
             DrawText(g, collapsed ? "+" : "−", _panelTitleFont, _gold, header.X + 10, header.Y + 3, 18, 21, StringAlignment.Center);
             DrawText(g, ShortName(game.Name), _smallFont, _ink, header.X + 38, header.Y + 6, 185, 18);
-            var categoryStatus = !source.IsAvailable ? "GAME COPY NOT FOUND" : categoryUnlocked ? $"CATEGORY OPEN · {boughtCount} OWNED" : $"LOCKED · UNLOCK ${categoryCost:N0}";
-            DrawText(g, categoryStatus, _smallFont, !source.IsAvailable ? _muted : categoryUnlocked ? _teal : _gold, header.X + 250, header.Y + 6, 380, 18);
+            var categoryStatus = categoryUnlocked ? $"CATEGORY OPEN · {boughtCount} OWNED" : $"LOCKED · UNLOCK ${categoryCost:N0}";
+            DrawText(g, categoryStatus, _smallFont, categoryUnlocked ? _teal : _gold, header.X + 250, header.Y + 6, 380, 18);
             DrawText(g, "12 PORTRAIT SLOTS", _smallFont, _muted, header.Right - 195, header.Y + 6, 180, 18, StringAlignment.Far);
             y += headerH + groupGap;
             if (collapsed) { y += groupGap; continue; }
@@ -1175,10 +1311,10 @@ internal sealed class GameForm : Form
                 var unlockPanel = new RectangleF(_rosterViewportRect.X + 19, y, 1095, 66);
                 DrawPanel(g, unlockPanel, Color.FromArgb(20, 17, 23));
                 DrawText(g, $"{ShortName(game.Name).ToUpperInvariant()} CHARACTER FILE", _smallFont, _ink, unlockPanel.X + 14, unlockPanel.Y + 10, 330, 18);
-                DrawText(g, source.IsAvailable ? "One-time category unlock; characters still cost extra." : "Install this game to unlock its character file.", _smallFont, _muted, unlockPanel.X + 14, unlockPanel.Y + 34, 610, 18);
+                DrawText(g, "One-time category unlock; characters still cost extra.", _smallFont, _muted, unlockPanel.X + 14, unlockPanel.Y + 34, 610, 18);
                 var unlockButton = new RectangleF(unlockPanel.Right - 250, unlockPanel.Y + 12, 234, 42);
                 _animatronicCategoryUnlockRects[game.Id] = unlockButton;
-                DrawButton(g, unlockButton, source.IsAvailable ? "UNLOCK CATEGORY" : "SOURCE REQUIRED", $"${categoryCost:N0}", _gold, Color.FromArgb(47, 35, 19), source.IsAvailable && _funds >= categoryCost);
+                DrawButton(g, unlockButton, "UNLOCK CATEGORY", $"${categoryCost:N0}", _gold, Color.FromArgb(47, 35, 19), _funds >= categoryCost);
                 y += 76;
                 continue;
             }
@@ -1305,6 +1441,11 @@ internal sealed class GameForm : Form
             var game = _sheets.Games.FirstOrDefault(entry => entry.Id == _pendingPurchaseId);
             if (game is not null) { name = $"{ShortName(game.Name)} CHARACTER FILE"; cost = AnimatronicCategoryCost(game.Id); }
         }
+        else if (_pendingPurchaseKind == PurchaseKind.CatalogCategory && _pendingPurchaseId is not null)
+        {
+            var category = CatalogCategories.FirstOrDefault(entry => entry.Id == _pendingPurchaseId);
+            if (category.Id is not null) { name = $"{category.Name} CATALOG"; cost = category.Cost; }
+        }
         DrawText(g, "CONFIRM PURCHASE", _panelTitleFont, _gold, panel.X + 24, panel.Y + 22, panel.Width - 48, 24, StringAlignment.Center);
         DrawText(g, name, _cardTitleFont, _ink, panel.X + 25, panel.Y + 66, panel.Width - 50, 25, StringAlignment.Center);
         DrawText(g, $"SPEND ${cost:N0}?  AVAILABLE: ${_funds:N0}", _smallFont, _muted, panel.X + 25, panel.Y + 101, panel.Width - 50, 20, StringAlignment.Center);
@@ -1319,7 +1460,7 @@ internal sealed class GameForm : Form
         if (_pendingPurchaseKind == PurchaseKind.Animatronic && _pendingPurchaseId is not null)
         {
             var item = _sheets.Animatronics.FirstOrDefault(a => a.Id == _pendingPurchaseId);
-            if (item is not null && !_owned.Contains(item.Id) && _sources[item.GameId].IsAvailable && _funds >= item.Cost)
+            if (item is not null && !_owned.Contains(item.Id) && _unlockedAnimatronicGames.Contains(item.GameId) && _funds >= item.Cost)
             {
                 _funds -= item.Cost;
                 _owned.Add(item.Id);
@@ -1332,6 +1473,12 @@ internal sealed class GameForm : Form
             if (item is not null && !_builtAttractions.Contains(item.Id) && _funds >= item.Cost)
             {
                 _funds -= item.Cost;
+                if (item.Id == "foil-party-set") _builtAttractions.Remove("paper-cups");
+                else if (item.Id == "neon-party-set")
+                {
+                    _builtAttractions.Remove("paper-cups");
+                    _builtAttractions.Remove("foil-party-set");
+                }
                 _builtAttractions.Add(item.Id);
             }
         }
@@ -1339,10 +1486,22 @@ internal sealed class GameForm : Form
         {
             var gameId = _pendingPurchaseId;
             var cost = AnimatronicCategoryCost(gameId);
-            if (_sources.TryGetValue(gameId, out var source) && source.IsAvailable && !_unlockedAnimatronicGames.Contains(gameId) && _funds >= cost)
+            if (!_unlockedAnimatronicGames.Contains(gameId) && _funds >= cost)
             {
                 _funds -= cost;
                 _unlockedAnimatronicGames.Add(gameId);
+            }
+        }
+        else if (_pendingPurchaseKind == PurchaseKind.CatalogCategory && _pendingPurchaseId is not null)
+        {
+            var category = _pendingPurchaseId;
+            var cost = CatalogCategoryCost(category);
+            if (CatalogCategoryIds.Contains(category) && !_purchasedCatalogCategories.Contains(category) && _funds >= cost)
+            {
+                _funds -= cost;
+                _purchasedCatalogCategories.Add(category);
+                _selectedCatalogCategory = category;
+                _catalogMessage = "Catalog purchased. Browse its attractions below.";
             }
         }
         _pendingPurchaseKind = PurchaseKind.None;
@@ -1461,6 +1620,7 @@ internal sealed class GameForm : Form
 
     private void DrawOfficeMonitor(Graphics g, RectangleF office)
     {
+        _puppetWindRect = RectangleF.Empty;
         var panel = office;
         using var casing = new SolidBrush(Color.FromArgb(255, 5, 7, 8));
         using var edge = new Pen(Color.FromArgb(255, 165, 168, 145), 3);
@@ -1549,6 +1709,23 @@ internal sealed class GameForm : Form
             if (occupants.Length > visibleCount) DrawText(g, $"+{occupants.Length - visibleCount} MORE ON THIS CAMERA", _smallFont, _gold, room.X, room.Bottom - 20, room.Width, 18, StringAlignment.Center);
         }
         DrawText(g, "LIVE CAMERA FEED · ANIMATRONIC PORTRAITS", _smallFont, _teal, feed.X + 12, room.Bottom + 17, feed.Width - 24, 18);
+        if (_stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
+        {
+            var boxLabel = _puppetEscaped ? "MUSIC BOX EMPTY · PUPPET LOOSE" : $"MUSIC BOX  {_puppetMusicBox}%";
+            DrawText(g, boxLabel, _smallFont, _puppetEscaped ? _red : _gold, feed.X + 12, feed.Bottom - 77, feed.Width - 24, 18, StringAlignment.Center);
+            var meter = new RectangleF(feed.X + 18, feed.Bottom - 55, feed.Width - 36, 8);
+            using (var track = new SolidBrush(Color.FromArgb(38, 46, 43))) g.FillRectangle(track, meter);
+            if (!_puppetEscaped && _puppetMusicBox > 0)
+            {
+                using var fill = new SolidBrush(_puppetMusicBox > 25 ? _teal : _red);
+                g.FillRectangle(fill, new RectangleF(meter.X, meter.Y, meter.Width * _puppetMusicBox / 100f, meter.Height));
+            }
+            if (!_puppetEscaped)
+            {
+                _puppetWindRect = new RectangleF(feed.X + 18, feed.Bottom - 42, feed.Width - 36, 30);
+                DrawButton(g, _puppetWindRect, "WIND MUSIC BOX  +25%", "CLICK", _gold, Color.FromArgb(29, 26, 18), true);
+            }
+        }
 
         var map = new RectangleF(feed.Right + 12, contentY, panel.Right - feed.Right - 30, contentHeight);
         using (var fill = new SolidBrush(Color.FromArgb(12, 17, 17))) g.FillRectangle(fill, map);
@@ -1556,13 +1733,13 @@ internal sealed class GameForm : Form
         DrawText(g, "CAMERA MAP · SELECT A FEED", _smallFont, _teal, map.X + 12, map.Y + 8, map.Width - 24, 18);
         var placements = new Dictionary<string, PointF>
         {
-            ["1A"] = new(.5f, .10f), ["1B"] = new(.5f, .38f), ["1C"] = new(.14f, .13f),
+            ["1A"] = new(.5f, .10f), ["1B"] = new(.5f, .38f), ["1C"] = new(.14f, .13f), ["10"] = new(.5f, .55f),
             ["2A"] = new(.12f, .50f), ["2B"] = new(.12f, .70f), ["3"] = new(.12f, .32f),
             ["4A"] = new(.88f, .50f), ["4B"] = new(.88f, .70f), ["5"] = new(.5f, .23f),
             ["6"] = new(.88f, .13f), ["7"] = new(.88f, .32f)
         };
         PointF CenterOf(string id) => new(map.X + map.Width * placements[id].X, map.Y + map.Height * placements[id].Y + 15);
-        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1B", "2A"), ("2A", "2B"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B") };
+        var links = new[] { ("1A", "5"), ("5", "1B"), ("1A", "1C"), ("1A", "10"), ("10", "2A"), ("1B", "2A"), ("2A", "2B"), ("3", "2A"), ("1B", "7"), ("7", "6"), ("1B", "4A"), ("4A", "4B") };
         using (var corridor = new Pen(Color.FromArgb(85, 95, 83, 65), 3))
             foreach (var (from, to) in links) g.DrawLine(corridor, CenterOf(from), CenterOf(to));
         var nodeW = Math.Min(94, map.Width * .43f);
@@ -1601,7 +1778,15 @@ internal sealed class GameForm : Form
         g.Clear(flash ? Color.FromArgb(155, 9, 12) : Color.FromArgb(3, 3, 4));
         using var shade = new SolidBrush(Color.FromArgb(105, 0, 0, 0));
         g.FillRectangle(shade, 0, 0, DesignWidth, DesignHeight);
-        if (_jumpscareAnimatronicId == "mr-ant-tenna" && _tennaModelArt is not null)
+        if (_jumpscareAnimatronicId is not null && _jumpscareArt.TryGetValue(_jumpscareAnimatronicId, out var scareImage))
+        {
+            ImageAnimator.UpdateFrames(scareImage);
+            var target = FitImage(scareImage, new RectangleF(70, 20, 1140, 680));
+            g.DrawImage(scareImage, target);
+            using var edge = new Pen(Color.FromArgb(flash ? 230 : 110, 190, 20, 28), flash ? 12 : 5);
+            g.DrawRectangle(edge, target.X, target.Y, target.Width, target.Height);
+        }
+        else if (_jumpscareAnimatronicId == "mr-ant-tenna" && _tennaModelArt is not null)
         {
             var shake = (int)(Environment.TickCount64 / 35 % 31) - 15;
             var target = FitImage(_tennaModelArt, new RectangleF(390 + shake, 45, 500, 600));
@@ -1765,6 +1950,7 @@ internal sealed class GameForm : Form
         _showRatingGuide = false;
         _prepScreen = _nightWon || _dayResetByDeath ? PrepScreen.Builder : PrepScreen.Roster;
         _dayResetByDeath = false;
+        _puppetMusicBox = 100; _puppetEscaped = false; _puppetWindRect = RectangleF.Empty;
         _rosterHoveredAnimatronic = null;
         SaveActiveSlot();
         Invalidate();
@@ -1840,8 +2026,10 @@ internal sealed class GameForm : Form
         using var fill = new SolidBrush(enabled && hover ? ControlPaint.Light(back, .12f) : enabled ? back : Color.FromArgb(17, 21, 21));
         using var edge = new Pen(enabled ? Color.FromArgb(76, fore.R, fore.G, fore.B) : Color.FromArgb(42, 47, 46), 1);
         g.FillRectangle(fill, r); g.DrawRectangle(edge, r.X, r.Y, r.Width, r.Height);
-        DrawText(g, text, _smallFont, enabled ? fore : Color.FromArgb(92, 99, 96), r.X + 13, r.Y + r.Height / 2 - 8, r.Width - 62, 18);
-        DrawText(g, value, _smallFont, enabled ? fore : Color.FromArgb(92, 99, 96), r.Right - 52, r.Y + r.Height / 2 - 8, 39, 18, StringAlignment.Far);
+        var valueWidth = Math.Clamp(g.MeasureString(value, _smallFont).Width + 8, 36, Math.Max(36, r.Width * .42f));
+        var labelWidth = Math.Max(0, r.Width - valueWidth - 34);
+        DrawText(g, text, _smallFont, enabled ? fore : Color.FromArgb(92, 99, 96), r.X + 13, r.Y + r.Height / 2 - 8, labelWidth, 18);
+        DrawText(g, value, _smallFont, enabled ? fore : Color.FromArgb(92, 99, 96), r.Right - valueWidth - 12, r.Y + r.Height / 2 - 8, valueWidth, 18, StringAlignment.Far);
     }
 
     private void DrawAiStepButton(Graphics g, RectangleF r, string glyph, bool enabled)
@@ -1896,6 +2084,7 @@ internal sealed class GameForm : Form
         _pendingUntil.Clear(); _nextAttack.Clear(); _resolved.Clear(); _animatronicCameras.Clear(); _animatronicRouteIndices.Clear();
         foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
+            if (a.Action == "puppet") continue;
             _animatronicCameras[a.Id] = RouteFor(a.Id)[0];
             _animatronicRouteIndices[a.Id] = 0;
             if (!a.Id.Equals("golden-freddy", StringComparison.OrdinalIgnoreCase) && !a.Id.Equals("mr-ant-tenna", StringComparison.OrdinalIgnoreCase))
@@ -1979,6 +2168,25 @@ internal sealed class GameForm : Form
                 return;
             }
         }
+        if (_stageAnimatronics.Contains("puppet") && _ai.GetValueOrDefault("puppet") > 0)
+        {
+            if (!_puppetEscaped)
+            {
+                var drain = (_ai["puppet"] / 10 + 1) * 2;
+                _puppetMusicBox = Math.Max(0, _puppetMusicBox - drain);
+                if (_puppetMusicBox == 0)
+                {
+                    _puppetEscaped = true;
+                    _message = "The music box stopped. The Puppet is loose; lower the monitor to avoid her attack.";
+                }
+            }
+            else if (_monitorOpen && _random.Next(3) == 0)
+            {
+                _message = "The Puppet attacked from the music box!";
+                BeginJumpscare("puppet");
+                return;
+            }
+        }
         if (_ventCooldown > 0) _ventCooldown--;
         if (_seconds % 4 == 0)
         {
@@ -1987,6 +2195,7 @@ internal sealed class GameForm : Form
         }
         foreach (var a in _sheets.Animatronics.Where(a => _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
+            if (a.Action == "puppet") continue;
             if (_nextAttack.TryGetValue(a.Id, out var due) && due <= _seconds && !_pendingUntil.ContainsKey(a.Id))
             {
                 var route = RouteFor(a.Id);
@@ -2117,9 +2326,18 @@ internal sealed class GameForm : Form
         NightSounds.StopAmbience();
         NightSounds.Play(animatronicId == "golden-freddy" ? "golden-jumpscare" : "jumpscare");
         _jumpscareAnimatronicId = animatronicId;
+        if (animatronicId is not null && _jumpscareArt.TryGetValue(animatronicId, out var scareImage) && ImageAnimator.CanAnimate(scareImage))
+            ImageAnimator.Animate(scareImage, OnJumpscareFrameChanged);
         _jumpscareActive = true;
         _jumpscareTimer.Start();
         Invalidate();
+    }
+
+    private void OnJumpscareFrameChanged(object? sender, EventArgs e)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { if (InvokeRequired) BeginInvoke((Action)Invalidate); else Invalidate(); }
+        catch (InvalidOperationException) { }
     }
 
     private void StartTennaQuiz()
@@ -2168,6 +2386,14 @@ internal sealed class GameForm : Form
         _message = _tennaCorrectAnswers >= 2
             ? "Mr. (ant) Tenna accepted your answers and left the monitor."
             : "Quiz failed. Tenna may return; wrong answers cost 20% battery each.";
+    }
+
+    private void WindPuppetMusicBox()
+    {
+        if (!_monitorOpen || !_cameraMonitorMode || _puppetEscaped || !_stageAnimatronics.Contains("puppet")) return;
+        _puppetMusicBox = Math.Min(100, _puppetMusicBox + 25);
+        _message = $"Music box wound to {_puppetMusicBox}%. Keep it wound to hold the Puppet back.";
+        Invalidate();
     }
 
     private void DrawTennaQuiz(Graphics g)
@@ -2231,7 +2457,7 @@ internal sealed class GameForm : Form
         "door" => $"Movement at the right doorway. Press {KeyLabel(_controlBindings["right-door"])} to close it.",
         "foxy" => $"Foxy is charging from Pirate Cove! Press {KeyLabel(_controlBindings["left-door"])} to shut the left door.",
         "golden" => $"Golden Freddy is in the office! Press {KeyLabel(_controlBindings["monitor"])} to raise the monitor and dismiss him.",
-        "mask" => $"Toy Bonnie is in the hall. Press {KeyLabel(_controlBindings["mask"])} to put on the mask and stay still.",
+        "mask" => $"{a.Name} is in the hall. Press {KeyLabel(_controlBindings["mask"])} to put on the mask and stay still.",
         "lure" => $"Springtrap is near. Press {KeyLabel(_controlBindings["lure"])} to use the audio lure while ventilation is stable.",
         "listen" => $"Breathing at the left door. Press {KeyLabel(_controlBindings["listen"])} to listen, then {KeyLabel(_controlBindings["left-door"])} to close the left door.",
         "scan" => $"Scrap Baby is in the vents. Press {KeyLabel(_controlBindings["scan"])} to scan before she reaches the office.", _ => "Something is moving nearby."
@@ -2242,7 +2468,7 @@ internal sealed class GameForm : Form
     private bool ActionAvailable(string action) => action switch
     {
         "left-door" or "right-door" => true, "left-light" => _leftLightOn || _doorPower > 0, "right-light" => _rightLightOn || _doorPower > 0,
-        "door" => true, "mask" => _owned.Contains("toy-bonnie"), "lure" => _owned.Contains("springtrap"),
+        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy"), "lure" => _owned.Contains("springtrap"),
         "listen" => _owned.Contains("nightmare-chica") && !_listening && _pendingUntil.TryGetValue("nightmare-chica", out var until) && until > _seconds && !_resolved.Contains("nightmare-chica"),
         "scan" => _owned.Contains("scrap-baby"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby"), _ => false
     };
@@ -2397,6 +2623,21 @@ internal sealed class GameForm : Form
         _cheatToastUntilUtc = DateTime.UtcNow.AddSeconds(3);
         _message = "Night skipped for testing.";
         FinishNight(true);
+        return true;
+    }
+
+    private bool ProcessUnlockCategoriesCheat(Keys key)
+    {
+        Keys[] sequence = [Keys.Up, Keys.Up, Keys.Down, Keys.Right, Keys.Left, Keys.A, Keys.B];
+        if (key == sequence[_unlockCategoriesCheatIndex]) _unlockCategoriesCheatIndex++;
+        else _unlockCategoriesCheatIndex = key == sequence[0] ? 1 : 0;
+        if (_unlockCategoriesCheatIndex < sequence.Length) return false;
+        _unlockCategoriesCheatIndex = 0;
+        _unlockedAnimatronicGames.UnionWith(_sheets.Games.Select(game => game.Id));
+        _cheatToastMessage = "CHEAT ACCEPTED · ANIMATRONIC CATEGORIES UNLOCKED";
+        _cheatToastUntilUtc = DateTime.UtcNow.AddSeconds(3);
+        SaveActiveSlot();
+        Invalidate();
         return true;
     }
 
@@ -2561,6 +2802,29 @@ internal sealed class GameForm : Form
                 Invalidate();
                 return;
             }
+            if (_musicVolumeRect.Contains(p))
+            {
+                _musicVolume = VolumeAt(p.X, _musicVolumeRect);
+                NightSounds.SetVolumes(_musicVolume, _effectsVolume);
+                SavePreferences(); Invalidate(); return;
+            }
+            if (_effectsVolumeRect.Contains(p))
+            {
+                _effectsVolume = VolumeAt(p.X, _effectsVolumeRect);
+                NightSounds.SetVolumes(_musicVolume, _effectsVolume);
+                SavePreferences(); Invalidate(); return;
+            }
+            if (_displayModeRect.Contains(p))
+            {
+                ToggleDisplayMode();
+                _settingsMessage = _isFullscreen ? "Startup display set to fullscreen." : "Startup display set to windowed.";
+                Invalidate(); return;
+            }
+            if (_autoLaunchRect.Contains(p))
+            {
+                SetAutoLaunchOnSignIn(!_autoLaunchOnSignIn);
+                Invalidate(); return;
+            }
             foreach (var (action, rect) in _settingsBindingRects)
                 if (rect.Contains(p))
                 {
@@ -2576,6 +2840,7 @@ internal sealed class GameForm : Form
             if (_monitorToggleRect.Contains(p)) { ToggleOfficeMonitor(); return; }
             if (_monitorOpen)
             {
+                if (_puppetWindRect.Contains(p)) { WindPuppetMusicBox(); return; }
                 foreach (var (tabId, rect) in _officeMonitorTabRects)
                 {
                     if (!rect.Contains(p)) continue;
@@ -2611,7 +2876,7 @@ internal sealed class GameForm : Form
         if (_prepScreen == PrepScreen.Roster)
         {
             foreach (var (gameId, rect) in _animatronicCategoryUnlockRects)
-                if (rect.Contains(p) && !_unlockedAnimatronicGames.Contains(gameId) && _sources[gameId].IsAvailable && _funds >= AnimatronicCategoryCost(gameId))
+                if (rect.Contains(p) && !_unlockedAnimatronicGames.Contains(gameId) && _funds >= AnimatronicCategoryCost(gameId))
                 {
                     _pendingPurchaseId = gameId;
                     _pendingPurchaseKind = PurchaseKind.AnimatronicCategory;
@@ -2650,7 +2915,7 @@ internal sealed class GameForm : Form
                     var a = _sheets.Animatronics.First(entry => entry.Id == id);
                     if (!_owned.Contains(id))
                     {
-                        if (_sources[a.GameId].IsAvailable && _funds >= a.Cost)
+                        if (_funds >= a.Cost)
                         {
                             _pendingPurchaseId = id;
                             _pendingPurchaseKind = PurchaseKind.Animatronic;
@@ -2673,9 +2938,14 @@ internal sealed class GameForm : Form
                 {
                     _selectedCatalogCategory = category;
                     _catalogScrollOffset = 0;
-                    _catalogMessage = "Place purchases to raise your rating and unlock the next catalog.";
+                    _catalogMessage = "Catalog open. Buy attractions here, then place them on the blueprint.";
                 }
-                else _catalogMessage = $"This catalog unlocks at {CatalogRequirement(category)} pizzeria rating points. Place more purchases first.";
+                else if (_funds >= CatalogCategoryCost(category))
+                {
+                    _pendingPurchaseId = category;
+                    _pendingPurchaseKind = PurchaseKind.CatalogCategory;
+                }
+                else _catalogMessage = $"This catalog costs ${CatalogCategoryCost(category):N0}; available cash: ${_funds:N0}.";
                 Invalidate(); return;
             }
             if (_catalogScrollTrackRect.Contains(p) && _catalogContentHeight > _catalogViewportRect.Height)
@@ -2743,6 +3013,9 @@ internal sealed class GameForm : Form
 
     private PointF ToDesign(Point p) => new((p.X - _offsetX) / _scale, (p.Y - _offsetY) / _scale);
 
+    private static int VolumeAt(float x, RectangleF slider) => Math.Clamp(
+        (int)Math.Round(Math.Clamp((x - slider.X) / slider.Width, 0, 1) * 20, MidpointRounding.AwayFromZero) * 5, 0, 100);
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -2781,6 +3054,7 @@ internal sealed class GameForm : Form
             var firstPress = _cheatKeysHeld.Add(e.KeyCode);
             if (!firstPress) return;
             if (ProcessKonamiKey(e.KeyCode)) { e.Handled = true; e.SuppressKeyPress = true; return; }
+            if (ProcessUnlockCategoriesCheat(e.KeyCode)) { e.Handled = true; e.SuppressKeyPress = true; return; }
             if (ProcessNightSkipCheat(e.KeyCode)) { e.Handled = true; e.SuppressKeyPress = true; return; }
         }
         if (_nightStarted && _nightOver)
@@ -2846,6 +3120,7 @@ internal sealed class GameForm : Form
             WindowState = FormWindowState.Maximized;
             _isFullscreen = true;
         }
+        SavePreferences();
         Invalidate();
     }
 
@@ -2862,6 +3137,7 @@ internal sealed class GameForm : Form
         "Five Nights at Freddy's 3" => "FNAF 3",
         "Five Nights at Freddy's 4" => "FNAF 4",
         "Freddy Fazbear's Pizzeria Simulator" => "PIZZERIA SIM",
+        "FNAF Mades" => "FNAF Customs",
         _ => "UCN"
     };
 
@@ -2873,6 +3149,7 @@ internal sealed class GameForm : Form
         _timer.Dispose(); _blinkTimer.Dispose(); _jumpscareTimer.Dispose();
         foreach (var image in _sourceArt.Values) image?.Dispose();
         foreach (var image in _portraitArt.Values) image.Dispose();
+        foreach (var image in _jumpscareArt.Values) { ImageAnimator.StopAnimate(image, OnJumpscareFrameChanged); image.Dispose(); }
         foreach (var image in _catalogAttractionArt.Values) image.Dispose();
         _tennaModelArt?.Dispose();
         _brandFont.Dispose(); _titleFont.Dispose(); _bodyFont.Dispose(); _smallFont.Dispose(); _cardTitleFont.Dispose(); _panelTitleFont.Dispose(); _messageFont.Dispose(); _aiFont.Dispose(); _noMovementFont.Dispose(); _keyFont.Dispose(); _menuTitleFont.Dispose(); _menuSubtitleFont.Dispose();
