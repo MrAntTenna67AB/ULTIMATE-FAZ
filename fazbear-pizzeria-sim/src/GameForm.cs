@@ -12,6 +12,7 @@ internal sealed class GameForm : Form
     private readonly Dictionary<string, Bitmap?> _sourceArt = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Bitmap> _portraitArt = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Bitmap> _catalogAttractionArt = new(StringComparer.OrdinalIgnoreCase);
+    private Bitmap? _tennaModelArt;
     private readonly HashSet<string> _owned = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _unlockedAnimatronicGames = new(StringComparer.OrdinalIgnoreCase) { "fnaf1", "ucn" };
     private readonly HashSet<string> _stageAnimatronics = new(StringComparer.OrdinalIgnoreCase);
@@ -70,6 +71,15 @@ internal sealed class GameForm : Form
     private bool _cameraMonitorMode;
     private bool _goldenFreddyReady;
     private bool _goldenFreddyEncounterTriggered;
+    private bool _tennaQuizActive;
+    private int _tennaQuestionPosition;
+    private int _tennaCorrectAnswers;
+    private int _tennaFailedAnswers;
+    private int _tennaSecondsRemaining;
+    private int _tennaQuizCooldownUntil;
+    private int[] _tennaQuestionOrder = [];
+    private string[] _tennaShuffledAnswers = [];
+    private readonly Dictionary<int, RectangleF> _tennaAnswerRects = [];
     private string _selectedCamera = "1A";
     private bool _leftLightOn;
     private bool _rightLightOn;
@@ -171,6 +181,20 @@ internal sealed class GameForm : Form
         ("bulbs", "REPLACE BULBS", 17, false), ("ovens", "CLEAN OVENS", 17, false),
         ("toilets", "UNCLOG TOILETS", 17, false)
     ];
+    private sealed record TennaQuestion(string Prompt, string[] Answers, string CorrectAnswer);
+    private static readonly TennaQuestion[] TennaQuestions =
+    [
+        new("Finish the sentence! ‘WAS THAT HE BITE OF ???’", ["85", "83", "86", "87"], "87"),
+        new("What's the name of the child in Haunting Foxy?", ["Fritz", "Bob", "Unknown", "Roxy"], "Fritz"),
+        new("It been so ???", ["Long", "Short", "Midly long", "Soon"], "Long"),
+        new("What's in the box?", ["The lore", "Nothing", "Better to keep it a secret"], "Better to keep it a secret"),
+        new("Say it with me, folks!", ["ITS T-V TIME!", "ITS!! T-V!! TIME!!"], "ITS!! T-V!! TIME!!"),
+        new("Which one's the best?", ["Xbox", "PS4", "Switch"], "Xbox"),
+        new("Bonnie is...", ["Blue", "Purple", "Mixed"], "Blue"),
+        new("Chica is what?", ["A fat ass", "Cutie", "Chicken"], "Cutie"),
+        new("Will you buy Mr. (ant) Tenna merch (trademark pending)?", ["Yes we will!", "No.", "Yes daddy CRT"], "Yes we will!"),
+        new("Do you love TV?", ["I LOVE TV!!!", "I HATE TV!!!"], "I LOVE TV!!!")
+    ];
     private static readonly (string Id, string Name)[] FnafCameras =
     [
         ("1A", "SHOW STAGE"), ("1B", "DINING AREA"), ("1C", "PIRATE COVE"),
@@ -253,6 +277,9 @@ internal sealed class GameForm : Form
             if (!File.Exists(path)) continue;
             try { using var image = Image.FromFile(path); _portraitArt[a.Id] = new Bitmap(image); } catch { }
         }
+        var tennaModelPath = Path.Combine(portraitDirectory, "mr-ant-tenna-model.png");
+        if (File.Exists(tennaModelPath))
+            try { using var image = Image.FromFile(tennaModelPath); _tennaModelArt = new Bitmap(image); } catch { }
         var attractionArtDirectory = Path.Combine(AppContext.BaseDirectory, "assets", "attractions");
         foreach (var attraction in sheets.Attractions)
         {
@@ -316,6 +343,7 @@ internal sealed class GameForm : Form
         if (_settingsOpen) DrawSettings(g);
         else if (_showMenu) DrawMenu(g);
         else if (_jumpscareActive) DrawJumpscare(g);
+        else if (_tennaQuizActive) DrawTennaQuiz(g);
         else if (_nightStarted && _nightOver) DrawResult(g);
         else if (_nightStarted) DrawNight(g);
         else DrawPizzeria(g);
@@ -767,7 +795,7 @@ internal sealed class GameForm : Form
         DrawText(g, "THE CATALOG", _titleFont, _ink, 48, 141, 700, 34);
         var rating = PizzeriaRating();
         var points = rating.Atmosphere + rating.HealthSafety + rating.Entertainment + rating.BonusRevenue;
-        DrawText(g, $"Pizzeria rating {points} · Place purchases to unlock better catalogs. Select a category below.", _bodyFont, _muted, 50, 178, 1120, 24);
+        DrawText(g, $"Pizzeria rating {points} · Attractions are bought with available cash; click BUY and confirm. Rating unlocks better catalogs.", _bodyFont, _muted, 50, 178, 1172, 24);
         var categories = new[]
         {
             (Id: "dumpster", Name: "DUMPSTER DIVER WEEKLY", Required: 0),
@@ -807,7 +835,7 @@ internal sealed class GameForm : Form
             var buy = new RectangleF(card.Right - 146, card.Y + 15, 132, 42);
             _attractionBuyRects[attraction.Id] = buy;
             var canBuy = !_builtAttractions.Contains(attraction.Id) && _funds >= attraction.Cost;
-            DrawButton(g, buy, _builtAttractions.Contains(attraction.Id) ? "BUILT" : canBuy ? "BUY" : "NEED CASH", _builtAttractions.Contains(attraction.Id) ? "✓" : canBuy ? $"${attraction.Cost:N0}" : "—", canBuy ? _teal : _muted, Color.FromArgb(13, 28, 28), canBuy);
+            DrawButton(g, buy, _builtAttractions.Contains(attraction.Id) ? "BUILT" : canBuy ? "BUY WITH CASH" : "NEED CASH", _builtAttractions.Contains(attraction.Id) ? "✓" : canBuy ? $"${attraction.Cost:N0}" : "—", canBuy ? _teal : _muted, Color.FromArgb(13, 28, 28), canBuy);
         }
         g.Restore(state);
         _catalogScrollTrackRect = new RectangleF(1227, _catalogViewportRect.Y, 7, _catalogViewportRect.Height);
@@ -1561,7 +1589,13 @@ internal sealed class GameForm : Form
         g.Clear(flash ? Color.FromArgb(155, 9, 12) : Color.FromArgb(3, 3, 4));
         using var shade = new SolidBrush(Color.FromArgb(105, 0, 0, 0));
         g.FillRectangle(shade, 0, 0, DesignWidth, DesignHeight);
-        if (_jumpscareAnimatronicId is not null && _portraitArt.TryGetValue(_jumpscareAnimatronicId, out var portrait))
+        if (_jumpscareAnimatronicId == "mr-ant-tenna" && _tennaModelArt is not null)
+        {
+            var shake = (int)(Environment.TickCount64 / 35 % 31) - 15;
+            var target = FitImage(_tennaModelArt, new RectangleF(390 + shake, 45, 500, 600));
+            g.DrawImage(_tennaModelArt, target);
+        }
+        else if (_jumpscareAnimatronicId is not null && _portraitArt.TryGetValue(_jumpscareAnimatronicId, out var portrait))
         {
             var shake = (int)(Environment.TickCount64 / 35 % 19) - 9;
             var target = new RectangleF(185 + shake, 35, 910 - Math.Abs(shake) * 2, 630);
@@ -1816,6 +1850,14 @@ internal sealed class GameForm : Form
         g.DrawString(text, font, brush, new RectangleF(x, y, width, height), format);
     }
 
+    private static RectangleF FitImage(Image image, RectangleF bounds)
+    {
+        var scale = Math.Min(bounds.Width / image.Width, bounds.Height / image.Height);
+        var width = image.Width * scale;
+        var height = image.Height * scale;
+        return new RectangleF(bounds.X + (bounds.Width - width) / 2, bounds.Y + (bounds.Height - height) / 2, width, height);
+    }
+
     private static void DrawLine(Graphics g, Color color, float width, float x1, float y1, float x2, float y2)
     {
         using var p = new Pen(color, width); g.DrawLine(p, x1, y1, x2, y2);
@@ -1830,6 +1872,7 @@ internal sealed class GameForm : Form
         _payoutAiBonusCollected = 0;
         _payoutAnimatronicBonusCollected = 0;
         _dayResetByDeath = false;
+        _tennaQuizActive = false; _tennaFailedAnswers = 0; _tennaQuestionOrder = []; _tennaShuffledAnswers = []; _tennaQuizCooldownUntil = 0;
         _goldenFreddyReady = false; _goldenFreddyEncounterTriggered = false;
         _nightStarted = true; _nightOver = false; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
@@ -1841,7 +1884,7 @@ internal sealed class GameForm : Form
         {
             _animatronicCameras[a.Id] = RouteFor(a.Id)[0];
             _animatronicRouteIndices[a.Id] = 0;
-            if (!a.Id.Equals("golden-freddy", StringComparison.OrdinalIgnoreCase))
+            if (!a.Id.Equals("golden-freddy", StringComparison.OrdinalIgnoreCase) && !a.Id.Equals("mr-ant-tenna", StringComparison.OrdinalIgnoreCase))
                 _nextAttack[a.Id] = Math.Max(5, a.FirstAttackSeconds - _ai[a.Id] / 2);
         }
         NightSounds.StartAmbience();
@@ -1851,6 +1894,12 @@ internal sealed class GameForm : Form
     private void AdvanceNight()
     {
         if (!_nightStarted || _nightOver) return;
+        if (_tennaQuizActive)
+        {
+            if (--_tennaSecondsRemaining <= 0) SubmitTennaAnswer(null);
+            Invalidate();
+            return;
+        }
         _seconds++;
         if (_activeOfficeTaskId is not null && --_officeTaskSecondsRemaining <= 0)
         {
@@ -1903,6 +1952,13 @@ internal sealed class GameForm : Form
                 _message = "Power depleted. Doors opened; monitor and doorway lights shut down.";
                 NightSounds.Play("powerdown");
             }
+        }
+        if (_monitorOpen && _seconds >= _tennaQuizCooldownUntil &&
+            _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0 && _random.Next(240) == 0)
+        {
+            StartTennaQuiz();
+            Invalidate();
+            return;
         }
         if (_ventCooldown > 0) _ventCooldown--;
         if (_seconds % 4 == 0)
@@ -2032,12 +2088,108 @@ internal sealed class GameForm : Form
     private void BeginJumpscare(string? animatronicId)
     {
         _timer.Stop();
+        _tennaQuizActive = false;
         NightSounds.StopAmbience();
         NightSounds.Play(animatronicId == "golden-freddy" ? "golden-jumpscare" : "jumpscare");
         _jumpscareAnimatronicId = animatronicId;
         _jumpscareActive = true;
         _jumpscareTimer.Start();
         Invalidate();
+    }
+
+    private void StartTennaQuiz()
+    {
+        _tennaQuestionOrder = Enumerable.Range(0, TennaQuestions.Length).OrderBy(_ => _random.Next()).Take(3).ToArray();
+        _tennaQuestionPosition = 0;
+        _tennaCorrectAnswers = 0;
+        _tennaQuizCooldownUntil = _seconds + 45;
+        _tennaQuizActive = true;
+        PrepareTennaQuestion();
+        _message = "Mr. (ant) Tenna hijacked the monitor! Answer his quiz.";
+    }
+
+    private void PrepareTennaQuestion()
+    {
+        var question = TennaQuestions[_tennaQuestionOrder[_tennaQuestionPosition]];
+        _tennaShuffledAnswers = question.Answers.OrderBy(_ => _random.Next()).ToArray();
+        _tennaSecondsRemaining = 7;
+    }
+
+    private void SubmitTennaAnswer(string? answer)
+    {
+        if (!_tennaQuizActive) return;
+        var question = TennaQuestions[_tennaQuestionOrder[_tennaQuestionPosition]];
+        if (answer is not null && answer.Equals(question.CorrectAnswer, StringComparison.OrdinalIgnoreCase))
+            _tennaCorrectAnswers++;
+        else
+        {
+            _tennaFailedAnswers++;
+            var powerLoss = (int)Math.Ceiling(_doorPower * .20);
+            _doorPower = Math.Max(0, _doorPower - powerLoss);
+            if (_tennaFailedAnswers >= 3)
+            {
+                _tennaQuizActive = false;
+                BeginJumpscare("mr-ant-tenna");
+                return;
+            }
+        }
+        _tennaQuestionPosition++;
+        if (_tennaQuestionPosition < _tennaQuestionOrder.Length)
+        {
+            PrepareTennaQuestion();
+            return;
+        }
+        _tennaQuizActive = false;
+        _message = _tennaCorrectAnswers >= 2
+            ? "Mr. (ant) Tenna accepted your answers and left the monitor."
+            : "Quiz failed. Tenna may return; wrong answers cost 20% battery each.";
+    }
+
+    private void DrawTennaQuiz(Graphics g)
+    {
+        using var shade = new SolidBrush(Color.FromArgb(248, 4, 5, 8));
+        g.FillRectangle(shade, 0, 88, DesignWidth, 592);
+        var questionPanel = new RectangleF(42, 112, 890, 526);
+        var tennaPanel = new RectangleF(950, 112, 282, 526);
+        DrawPanel(g, questionPanel, Color.FromArgb(18, 15, 24));
+        DrawPanel(g, tennaPanel, Color.FromArgb(22, 16, 29));
+        using (var edge = new Pen(_gold, 2))
+        {
+            g.DrawRectangle(edge, questionPanel.X, questionPanel.Y, questionPanel.Width, questionPanel.Height);
+            g.DrawRectangle(edge, tennaPanel.X, tennaPanel.Y, tennaPanel.Width, tennaPanel.Height);
+        }
+        var q = TennaQuestions[_tennaQuestionOrder[_tennaQuestionPosition]];
+        DrawText(g, $"QUESTION {_tennaQuestionPosition + 1} / 3", _smallFont, _gold, questionPanel.X + 28, questionPanel.Y + 22, 260, 22);
+        DrawText(g, $"CORRECT {_tennaCorrectAnswers} / 2 NEEDED", _smallFont, _teal, questionPanel.X + 300, questionPanel.Y + 22, 360, 22);
+        DrawText(g, $"TIME 00:{_tennaSecondsRemaining:00}", _smallFont, _red, questionPanel.Right - 190, questionPanel.Y + 22, 160, 22, StringAlignment.Far);
+        DrawLine(g, _edge, 2, questionPanel.X + 24, questionPanel.Y + 58, questionPanel.Right - 24, questionPanel.Y + 58);
+        DrawText(g, q.Prompt, _menuSubtitleFont, _ink, questionPanel.X + 36, questionPanel.Y + 82, questionPanel.Width - 72, 100);
+        var columns = _tennaShuffledAnswers.Length == 4 ? 2 : _tennaShuffledAnswers.Length;
+        var rows = (int)Math.Ceiling(_tennaShuffledAnswers.Length / (double)columns);
+        var gapX = 18f; var gapY = 18f;
+        var buttonW = (questionPanel.Width - 72 - gapX * (columns - 1)) / columns;
+        var buttonH = rows == 1 ? 118f : 104f;
+        _tennaAnswerRects.Clear();
+        for (var i = 0; i < _tennaShuffledAnswers.Length; i++)
+        {
+            var col = i % columns;
+            var row = i / columns;
+            var x = questionPanel.X + 36 + col * (buttonW + gapX);
+            var y = questionPanel.Y + 215 + row * (buttonH + gapY);
+            var rect = new RectangleF(x, y, buttonW, buttonH);
+            _tennaAnswerRects[i] = rect;
+            DrawButton(g, rect, _tennaShuffledAnswers[i], ((char)('A' + i)).ToString(), _ink, Color.FromArgb(26, 21, 34), true);
+        }
+        DrawText(g, "THREE RANDOM FNAF QUESTIONS · 7 SECONDS EACH · 3 WRONG ANSWERS = GAME OVER", _smallFont, _muted,
+            questionPanel.X + 28, questionPanel.Bottom - 34, questionPanel.Width - 56, 18, StringAlignment.Center);
+        DrawText(g, "MR. (ANT) TENNA", _cardTitleFont, _gold, tennaPanel.X + 15, tennaPanel.Y + 18, tennaPanel.Width - 30, 25, StringAlignment.Center);
+        if (_tennaModelArt is not null)
+        {
+            var model = FitImage(_tennaModelArt, new RectangleF(tennaPanel.X + 18, tennaPanel.Y + 62, tennaPanel.Width - 36, 380));
+            g.DrawImage(_tennaModelArt, model);
+        }
+        DrawText(g, $"BATTERY  {_doorPower}%", _smallFont, _doorPower > 25 ? _gold : _red, tennaPanel.X + 18, tennaPanel.Bottom - 58, tennaPanel.Width - 36, 20, StringAlignment.Center);
+        DrawText(g, $"MISSED ANSWERS  {_tennaFailedAnswers} / 3", _smallFont, _muted, tennaPanel.X + 18, tennaPanel.Bottom - 32, tennaPanel.Width - 36, 18, StringAlignment.Center);
     }
 
     private bool WasHandled(Animatronic a) => a.Action switch
@@ -2239,6 +2391,7 @@ internal sealed class GameForm : Form
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
+        if (_tennaQuizActive) return;
         var p = ToDesign(e.Location);
         if (_pendingPurchaseKind != PurchaseKind.None) return;
         if (_prepScreen == PrepScreen.Builder && _catalogViewportRect.Contains(p))
@@ -2274,6 +2427,7 @@ internal sealed class GameForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        if (_tennaQuizActive) return;
         var p = ToDesign(e.Location);
         if (e.Button == MouseButtons.Left && HandleResultButton(p))
         {
@@ -2313,6 +2467,12 @@ internal sealed class GameForm : Form
         {
             if (_purchaseConfirmRect.Contains(p)) ConfirmPendingPurchase();
             else if (_purchaseCancelRect.Contains(p)) CancelPendingPurchase();
+            return;
+        }
+        if (_tennaQuizActive)
+        {
+            foreach (var (index, rect) in _tennaAnswerRects)
+                if (rect.Contains(p)) { SubmitTennaAnswer(_tennaShuffledAnswers[index]); return; }
             return;
         }
         if (_nightStarted && _nightOver && HandleResultButton(p)) return;
@@ -2561,6 +2721,7 @@ internal sealed class GameForm : Form
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (_tennaQuizActive) { e.Handled = true; e.SuppressKeyPress = true; return; }
         if (_waitingForBindingAction is not null)
         {
             BindCapturedKey(e.KeyCode);
@@ -2688,6 +2849,7 @@ internal sealed class GameForm : Form
         foreach (var image in _sourceArt.Values) image?.Dispose();
         foreach (var image in _portraitArt.Values) image.Dispose();
         foreach (var image in _catalogAttractionArt.Values) image.Dispose();
+        _tennaModelArt?.Dispose();
         _brandFont.Dispose(); _titleFont.Dispose(); _bodyFont.Dispose(); _smallFont.Dispose(); _cardTitleFont.Dispose(); _panelTitleFont.Dispose(); _messageFont.Dispose(); _aiFont.Dispose(); _noMovementFont.Dispose(); _keyFont.Dispose(); _menuTitleFont.Dispose(); _menuSubtitleFont.Dispose();
         foreach (var source in _sources.Values) source.Dispose();
         base.OnFormClosed(e);
