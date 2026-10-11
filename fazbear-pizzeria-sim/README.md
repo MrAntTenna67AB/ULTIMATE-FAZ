@@ -1,6 +1,12 @@
 # Ultimate Faz 1.7.0
 
-Windows x64 release: `artifacts/Ultimate-Faz-1.7.0-win-x64.zip`. Extract the archive and launch `FazbearPizzeria.exe` from the extracted folder.
+Windows x64 package: download the zip from the [GitHub Releases page](https://github.com/MrAntTenna67AB/ULTIMATE-FAZ/releases). Attach `artifacts/Ultimate-Faz-1.7.0-dotnet-host-win-x64.zip` as a release asset; it is intentionally kept out of the Git repository because it is over GitHub's 100 MiB repository-file limit. After extracting it, launch with the Microsoft-signed .NET host from PowerShell:
+
+```powershell
+./dotnet.exe ./FazbearPizzeria.dll --game-dir "C:\Program Files (x86)\Steam\steamapps\common\Five Nights at Freddy's"
+```
+
+Melty's one-click launch uses the same signed host and passes the player's game folder automatically. `FazbearPizzeria.exe` is also kept at the project root for local use, but it is unsigned and may show Microsoft's unknown-publisher/SmartScreen warning.
 
 A first playable slice for a solo FNAF mashup: start at a title menu, buy attractions in a catalog, place them in a blueprint floorplan, buy a small cross-series animatronic roster, then survive one office night. FNAF 1 is the required Melty launch game. FNAF 2, FNAF 3, FNAF 4, Freddy Fazbear's Pizzeria Simulator, and Ultimate Custom Night are read from the player's own Steam installs. The app loads each game's executable icon at runtime. Selected FNAF 1 effects and room ambience supplied by the user are bundled in the root `sound-bank/` folder; see its `SOURCES.md`.
 
@@ -8,7 +14,7 @@ The rules are a compact, original simulation: the purchased roster sets night th
 
 ## Local build
 
-Run `scripts/preflight.ps1` before building. It validates the JSON sheets and then publishes a self-contained Windows x64 app to `build/`. The runtime uses .NET 8 WinForms and needs no separate .NET installation on a player's PC. Melty should launch it with `--game-dir "{game}"` so it receives the player's FNAF 1 install directly.
+Run `scripts/preflight.ps1` before building. It validates the JSON sheets and publishes a self-contained Windows x64 app to `build/`. The runtime uses .NET 8 WinForms and needs no separate .NET installation on a player's PC. For the SmartScreen-friendly package, use the Microsoft-signed `dotnet.exe` host and pass `--game-dir "{game}"` in Melty's launch arguments.
 
 For local development only:
 
