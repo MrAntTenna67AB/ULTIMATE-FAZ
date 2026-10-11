@@ -42,7 +42,13 @@ if('freddy' -notin @($anim.animatronics | ForEach-Object id)) { $errors.Add('The
 foreach($required in @('source-scan','pizzeria-day','custom-night','power-and-vents','mask-and-listening','day-night-loop')) { if($required -notin @($systems.systems | ForEach-Object id)) { $errors.Add("Missing system sheet row $required") } }
 if($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
 Write-Host "Preflight clean: $($games.games.Count) game rows, $($anim.animatronics.Count) animatronics, $($systems.systems.Count) systems; all references resolve."
-dotnet publish (Join-Path $root 'src\FazbearPizzeria.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o (Join-Path $root 'build')
+$publishRoot = Join-Path $root 'build'
+if(Test-Path -LiteralPath $publishRoot) {
+  $resolvedBuild = (Resolve-Path -LiteralPath $publishRoot).Path
+  if($resolvedBuild -ne [System.IO.Path]::GetFullPath($publishRoot)) { throw "Refusing to clean unexpected build path: $resolvedBuild" }
+  Remove-Item -LiteralPath $resolvedBuild -Recurse -Force
+}
+dotnet publish (Join-Path $root 'src\FazbearPizzeria.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $publishRoot
 if($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 $publishSheets = Join-Path $root 'build\sheets'
 New-Item -ItemType Directory -Force -Path $publishSheets | Out-Null
@@ -60,6 +66,15 @@ if(Test-Path -LiteralPath (Join-Path $root 'assets\attractions')) {
   New-Item -ItemType Directory -Force -Path $publishAttractions | Out-Null
   Copy-Item -Path (Join-Path $root 'assets\attractions\*.png') -Destination $publishAttractions -Force
 }
+if(Test-Path -LiteralPath (Join-Path $root 'assets\jumpscares')) {
+  $publishJumpscares = Join-Path $root 'build\assets\jumpscares'
+  New-Item -ItemType Directory -Force -Path $publishJumpscares | Out-Null
+  Copy-Item -Path (Join-Path $root 'assets\jumpscares\*.gif') -Destination $publishJumpscares -Force
+  Copy-Item -Path (Join-Path $root 'assets\jumpscares\*.png') -Destination $publishJumpscares -Force
+  foreach($asset in Get-ChildItem -LiteralPath (Join-Path $root 'assets\jumpscares') -File) {
+    if(-not (Test-Path -LiteralPath (Join-Path $publishJumpscares $asset.Name))) { throw "Published jumpscare asset missing: $($asset.Name)" }
+  }
+}
 if(Test-Path -LiteralPath (Join-Path $root 'sound-bank')) {
   $publishSounds = Join-Path $root 'build\sound-bank'
   New-Item -ItemType Directory -Force -Path $publishSounds | Out-Null
@@ -69,4 +84,4 @@ if(Test-Path -LiteralPath (Join-Path $root 'sound-bank')) {
   }
 }
 foreach($a in $attractions.attractions) { if(-not (Test-Path -LiteralPath (Join-Path $root "build\assets\attractions\$($a.id).png"))) { throw "Published catalog picture missing: $($a.id).png" } }
-Write-Host 'Published app, data sheets, portraits, attraction art, and sound bank to build/.'
+Write-Host 'Published app, data sheets, portraits, attraction art, jumpscare art, and sound bank to build/.'

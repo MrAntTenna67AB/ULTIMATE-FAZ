@@ -1,4 +1,6 @@
-# Fazbear Pizzeria After Hours
+# Ultimate Faz 1.7.0
+
+Windows x64 release: `artifacts/Ultimate-Faz-1.7.0-win-x64.zip`. Extract the archive and launch `FazbearPizzeria.exe` from the extracted folder.
 
 A first playable slice for a solo FNAF mashup: start at a title menu, buy attractions in a catalog, place them in a blueprint floorplan, buy a small cross-series animatronic roster, then survive one office night. FNAF 1 is the required Melty launch game. FNAF 2, FNAF 3, FNAF 4, Freddy Fazbear's Pizzeria Simulator, and Ultimate Custom Night are read from the player's own Steam installs. The app loads each game's executable icon at runtime. Selected FNAF 1 effects and room ambience supplied by the user are bundled in the root `sound-bank/` folder; see its `SOURCES.md`.
 
