@@ -9,16 +9,18 @@ $errors = [System.Collections.Generic.List[string]]::new()
 foreach($g in $games.games) {
   foreach($field in @('id','name','steamAppId','exe','role','use')) { if([string]::IsNullOrWhiteSpace([string]$g.$field)) { $errors.Add("games.$($g.id): missing $field") } }
   if($null -eq $g.animatronicUnlockCost -or $g.animatronicUnlockCost -lt 0) { $errors.Add("games.$($g.id): animatronic category unlock cost must be zero or greater") }
-  if($g.role -ne 'secondary-unlisted' -and [string]::IsNullOrWhiteSpace([string]$g.slug)) { $errors.Add("games.$($g.id): missing Melty slug") }
-  if($g.steamAppId -notmatch '^\d+$') { $errors.Add("games.$($g.id): bad Steam app id") }
+  if($g.role -notin @('secondary-unlisted','custom') -and [string]::IsNullOrWhiteSpace([string]$g.slug)) { $errors.Add("games.$($g.id): missing Melty slug") }
+  if($g.role -eq 'custom') {
+    if($g.steamAppId -ne 'custom' -or $null -ne $g.slug) { $errors.Add("games.$($g.id): custom roster groups must not claim a real game") }
+  } elseif($g.steamAppId -notmatch '^\d+$') { $errors.Add("games.$($g.id): bad Steam app id") }
 }
 foreach($a in $anim.animatronics) {
   foreach($field in @('id','name','gameId','rule','action')) { if([string]::IsNullOrWhiteSpace([string]$a.$field)) { $errors.Add("animatronics.$($a.id): missing $field") } }
   if($a.gameId -notin $gameIds) { $errors.Add("animatronics.$($a.id): unresolved game $($a.gameId)") }
-  if($a.cost -lt 0 -or $a.firstAttackSeconds -lt 1 -or $a.warningSeconds -lt 1) { $errors.Add("animatronics.$($a.id): invalid numeric column") }
-  if($a.action -notin @('door','foxy','golden','tenna','mask','lure','listen','scan')) { $errors.Add("animatronics.$($a.id): unknown action $($a.action)") }
+  if($a.cost -lt 0 -or ($a.action -ne 'puppet' -and ($a.firstAttackSeconds -lt 1 -or $a.warningSeconds -lt 1))) { $errors.Add("animatronics.$($a.id): invalid numeric column") }
+  if($a.action -notin @('door','foxy','golden','tenna','mask','lure','listen','scan','mangle','puppet','debate')) { $errors.Add("animatronics.$($a.id): unknown action $($a.action)") }
   if($a.action -in @('door','listen') -and $a.doorSide -notin @('left','right')) { $errors.Add("animatronics.$($a.id): door threat must name left or right side") }
-  foreach($field in @('atmosphere','healthSafety','entertainment','bonusRevenue')) { if($null -eq $a.$field -or $a.$field -lt 0) { $errors.Add("animatronics.$($a.id): missing or invalid rating field $field") } }
+  foreach($field in @('atmosphere','healthSafety','entertainment','bonusRevenue')) { if($null -eq $a.$field -or ($field -ne 'healthSafety' -and $a.$field -lt 0)) { $errors.Add("animatronics.$($a.id): missing or invalid rating field $field") } }
   if(-not (Test-Path -LiteralPath (Join-Path $root "assets\portraits\$($a.id).png"))) { $errors.Add("animatronics.$($a.id): missing matching portrait asset assets/portraits/$($a.id).png") }
 }
 foreach($a in $attractions.attractions) {
@@ -32,8 +34,8 @@ foreach($s in $systems.systems) {
   foreach($ref in $s.gameRefs) { if($ref -notin $gameIds) { $errors.Add("systems.$($s.id): unresolved game $ref") } }
   if($s.fields.Count -eq 0) { $errors.Add("systems.$($s.id): no property columns") }
 }
-if($games.games.Count -ne 6) { $errors.Add('Expected six game source rows.') }
-  if($anim.animatronics.Count -ne 10) { $errors.Add('The prototype roster must include FNAF 1 Freddy, Bonnie, Chica, Foxy, and Golden Freddy, plus samples from the other games and Mr. (ant) Tenna.') }
+if(@($games.games | Where-Object role -ne 'custom').Count -ne 6) { $errors.Add('Expected six real game source rows.') }
+if(@($games.games | Where-Object role -eq 'custom').Count -ne 1) { $errors.Add('Expected one custom animatronic roster group.') }
 if($anim.defaultAiLevel -lt 0 -or $anim.defaultAiLevel -gt $anim.maximumAiLevel) { $errors.Add('Invalid default AI level bounds.') }
 if($anim.startingFunds -ne 200) { $errors.Add('The agreed starting budget must be $200.') }
 if('freddy' -notin @($anim.animatronics | ForEach-Object id)) { $errors.Add('The starter Freddy animatronic must remain in the roster.') }

@@ -1813,7 +1813,7 @@ internal sealed class GameForm : Form
             ("F2-KC", "F2-PC"), ("F2-PC", "F2-GA"), ("F2-GA", "F2-MH"), ("F2-MH", "F2-OH"), ("F2-OH", "F2-PR1"), ("F2-PR1", "F2-PR2"), ("F2-PR2", "F2-RV") };
         using (var corridor = new Pen(Color.FromArgb(85, 95, 83, 65), 3))
             foreach (var (from, to) in links) g.DrawLine(corridor, CenterOf(from), CenterOf(to));
-        var nodeW = Math.Min(94, map.Width * .43f);
+        var nodeW = Math.Min(94, map.Width * .22f);
         const float nodeH = 31;
         foreach (var (id, point) in placements)
         {
@@ -1824,7 +1824,7 @@ internal sealed class GameForm : Form
             using var nodeFill = new SolidBrush(selected ? Color.FromArgb(53, 39, 21) : Color.FromArgb(24, 31, 30));
             using var nodeEdge = new Pen(occupied ? _red : selected ? _gold : _edge, selected || occupied ? 2 : 1);
             g.FillRectangle(nodeFill, node); g.DrawRectangle(nodeEdge, node.X, node.Y, node.Width, node.Height);
-            DrawText(g, $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 7, node.Width, 17, StringAlignment.Center);
+            DrawText(g, id.StartsWith("F2-", StringComparison.OrdinalIgnoreCase) ? id : $"CAM {id}", _smallFont, occupied ? _red : selected ? _gold : _ink, node.X, node.Y + 7, node.Width, 17, StringAlignment.Center);
         }
         var office = new RectangleF(map.X + map.Width * .28f, map.Bottom - 42, map.Width * .44f, 28);
         using var officeFill = new SolidBrush(Color.FromArgb(61, 28, 26)); g.FillRectangle(officeFill, office);
@@ -2766,12 +2766,14 @@ internal sealed class GameForm : Form
                 break;
             case "left-light":
                 _leftLightOn = !_leftLightOn;
+                if (_leftLightOn) _rightLightOn = false;
                 _message = _leftLightOn ? "Left doorway illuminated. Light uses 1% power each second." : "Left doorway light off.";
                 if (_leftLightOn) NightSounds.Play(ThreatWaitingAt("left") ? "light-spotted" : "light");
                 else NightSounds.StopDoorLightSound();
                 break;
             case "right-light":
                 _rightLightOn = !_rightLightOn;
+                if (_rightLightOn) _leftLightOn = false;
                 _message = _rightLightOn ? "Right doorway illuminated. Light uses 1% power each second." : "Right doorway light off.";
                 if (_rightLightOn) NightSounds.Play(ThreatWaitingAt("right") ? "light-spotted" : "light");
                 else NightSounds.StopDoorLightSound();

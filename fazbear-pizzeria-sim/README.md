@@ -6,12 +6,12 @@ The rules are a compact, original simulation: the purchased roster sets night th
 
 ## Local build
 
-Run `scripts/preflight.ps1` before building. It validates the JSON sheets and then publishes a self-contained Windows x64 app to `build/`. The runtime uses .NET 8 WinForms and needs no separate .NET installation on a player's PC.
+Run `scripts/preflight.ps1` before building. It validates the JSON sheets and then publishes a self-contained Windows x64 app to `build/`. The runtime uses .NET 8 WinForms and needs no separate .NET installation on a player's PC. Melty should launch it with `--game-dir "{game}"` so it receives the player's FNAF 1 install directly.
 
 For local development only:
 
 ```powershell
-dotnet run --project src/FazbearPizzeria.csproj -- --fnaf1 "C:\Program Files (x86)\Steam\steamapps\common\Five Nights at Freddy's"
+dotnet run --project src/FazbearPizzeria.csproj -- --game-dir "C:\Program Files (x86)\Steam\steamapps\common\Five Nights at Freddy's"
 ```
 
 The app checks the six Steam installs on launch. Melty passes the FNAF 1 folder as the `--fnaf1` argument; secondary folders are found through Steam's library list and app manifests. If any required title is unavailable, the game reports the missing title and does not silently substitute placeholder art. Character cards use extracted portrait art from the player's installed games, packaged locally in `assets/portraits/`.

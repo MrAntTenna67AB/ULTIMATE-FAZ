@@ -1,5 +1,16 @@
 # Fazbear Pizzeria After Hours — build journal
 
+## Melty FNAF 1 integration investigation (2026-10-11)
+
+- The creator approved reworking this as a genuine FNAF 1 host project while retaining the existing pizzeria, catalog, roster, cheats, themes, and later additions.
+- Local FNAF 1 install is `C:\Program Files (x86)\Steam\steamapps\common\Five Nights at Freddy's`, with one 231,442,963-byte x86 executable and no separate data files. The user asked us to work from a copy; leave the installed executable untouched and perform all extraction in ignored `modlab/`.
+- Melty `game_info` reports no supported FNAF 1 loader; its supported path for a program of its own is standalone mode with `{game}` passed to launch arguments. It forbids passing the game as a tag without actually playing from its content.
+- Current C# app reads only executable icons from the installed games. All attraction pictures, character portrait/jumpscare images, and music currently ship in the project. This is not yet a genuine FNAF 1 content-based mashup.
+- Added `--game-dir` as the preferred explicit FNAF 1 folder argument (kept `--fnaf1` for local compatibility) and documented Melty's launch token. Needs build and one-click recipe check.
+- Universal Modder scan fingerprints the Steam EXE as 32-bit unknown native, with no loader; it warns that this is expected to be a minimal one-file Clickteam package. Its `um kb search` could not run because the bundled Python runtime lacks PyYAML.
+- The official Anaconda repo says it is a Clickteam Fusion 2.5 decompiler and explicitly directs 2.5+ games to its successor, Nebula. It includes Python 2.7 and a VS Python compiler installer; avoid a system install until the EXE build format is identified. The candidate source checkout is isolated under ignored `modlab/Anaconda`.
+- Current route decision is pending a read-only inspection/decompile: preferred Melty route is a standalone rewrite/port that consumes actual FNAF 1 install assets at runtime, preserving the simulator features, unless inspection shows a viable in-process Clickteam mod route that does not require altering the game design. Do not submit a release or claim FNAF 1 integration until a real installed-game asset/gameplay dependency is verified.
+
 ## Agreed slice
 
 - A single-player, offline pizzeria management day followed by one office night.

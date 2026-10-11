@@ -16,7 +16,10 @@ internal static class Program
         {
             var root = AppContext.BaseDirectory;
             var sheets = SheetLoader.Load(root);
-            var primary = ArgValue(args, "--fnaf1") ?? SteamInstallFinder.FindSteamPath();
+            var primary = ArgValue(args, "--game-dir")
+                ?? ArgValue(args, "--fnaf1")
+                ?? Environment.GetEnvironmentVariable("ULTIMATE_FAZBEAR_GAME_DIR")
+                ?? SteamInstallFinder.FindSteamPath();
             var sources = SteamInstallFinder.FindAll(sheets.Games, primary);
             Application.Run(new GameForm(sheets, sources, args.Contains("--capture-demo", StringComparer.OrdinalIgnoreCase)));
         }
