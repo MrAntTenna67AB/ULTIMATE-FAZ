@@ -1,12 +1,7 @@
 # Ultimate Faz 1.7.0
 
-Windows x64 package: download the zip from the [GitHub Releases page](https://github.com/MrAntTenna67AB/ULTIMATE-FAZ/releases). Attach `artifacts/Ultimate-Faz-1.7.0-dotnet-host-win-x64.zip` as a release asset; it is intentionally kept out of the Git repository because it is over GitHub's 100 MiB repository-file limit. After extracting it, launch with the Microsoft-signed .NET host from PowerShell:
+The unzipped Windows x64 build is in `release/Ultimate-Faz-1.7.0-dotnet-host/`. In GitHub Desktop, include that `release` folder when committing the build. To launch it, open that folder and double-click `Launch Ultimate Faz.cmd`; it starts the game through Microsoft's signed .NET host.
 
-```powershell
-./dotnet.exe ./FazbearPizzeria.dll --game-dir "C:\Program Files (x86)\Steam\steamapps\common\Five Nights at Freddy's"
-```
-
-Melty's one-click launch uses the same signed host and passes the player's game folder automatically. `FazbearPizzeria.exe` is also kept at the project root for local use, but it is unsigned and may show Microsoft's unknown-publisher/SmartScreen warning.
 
 A first playable slice for a solo FNAF mashup: start at a title menu, buy attractions in a catalog, place them in a blueprint floorplan, buy a small cross-series animatronic roster, then survive one office night. FNAF 1 is the required Melty launch game. FNAF 2, FNAF 3, FNAF 4, Freddy Fazbear's Pizzeria Simulator, and Ultimate Custom Night are read from the player's own Steam installs. The app loads each game's executable icon at runtime. Selected FNAF 1 effects and room ambience supplied by the user are bundled in the root `sound-bank/` folder; see its `SOURCES.md`.
 
