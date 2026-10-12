@@ -253,6 +253,9 @@ internal sealed class GameForm : Form
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
         ["toy-freddy"] = ["1A", "10", "1B", "2A", "2B"],
         ["toy-chica"] = ["1A", "5", "1B", "2A", "2B"],
+        ["balloon-boy"] = ["1A", "5", "1B", "2A", "2B"],
+        ["withered-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
+        ["withered-chica"] = ["1A", "5", "1B", "2A", "2B"],
         ["mangle"] = ["F2-KC", "F2-PC", "F2-GA", "F2-MH", "F2-OH", "F2-PR1", "F2-PR2", "F2-RV"],
         ["charlie-kirk"] = ["1A", "1B", "2A", "2B"],
         ["pee-monster"] = ["1A", "7", "V1"],
@@ -1363,16 +1366,31 @@ internal sealed class GameForm : Form
             }
 
             var cardX = _rosterViewportRect.X + 19;
+            var ordered = new Animatronic?[slotsPerGame];
+            var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in performers.Where(a => a.RosterSlot >= 0 && a.RosterSlot < slotsPerGame))
+            {
+                if (ordered[a.RosterSlot] is null) { ordered[a.RosterSlot] = a; placed.Add(a.Id); }
+            }
+            var cursor = 0;
+            foreach (var a in performers)
+            {
+                if (placed.Contains(a.Id)) continue;
+                while (cursor < slotsPerGame && ordered[cursor] is not null) cursor++;
+                if (cursor >= slotsPerGame) break;
+                ordered[cursor] = a;
+                placed.Add(a.Id);
+                cursor++;
+            }
             for (var slot = 0; slot < slotsPerGame; slot++)
             {
                 var card = new RectangleF(cardX + slot * (cardW + cardGap), y, cardW, cardH);
-                if (slot >= performers.Length)
+                if (ordered[slot] is not { } animatronic)
                 {
                     DrawPanel(g, card, Color.FromArgb(12, 14, 15));
                     DrawText(g, "EMPTY", _smallFont, Color.FromArgb(82, 91, 91), card.X + 5, card.Y + 40, card.Width - 10, 18, StringAlignment.Center);
                     continue;
                 }
-                var animatronic = performers[slot];
                 _rosterCardRects[animatronic.Id] = card;
                 if (card.Contains(_mouse)) _rosterHoveredAnimatronic = animatronic.Id;
                 DrawRosterPortraitCard(g, animatronic, card, _stageAnimatronics.Contains(animatronic.Id));
@@ -2744,7 +2762,7 @@ internal sealed class GameForm : Form
     private bool ActionAvailable(string action) => action switch
     {
         "left-door" or "right-door" => true, "left-light" => _leftLightOn || _doorPower > 0, "right-light" => _rightLightOn || _doorPower > 0,
-        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica") || _owned.Contains("mangle"), "lure" => _owned.Contains("springtrap"),
+        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica") || _owned.Contains("balloon-boy") || _owned.Contains("withered-bonnie") || _owned.Contains("withered-chica") || _owned.Contains("mangle"), "lure" => _owned.Contains("springtrap"),
         "listen" => _owned.Contains("nightmare-chica") && !_listening && _pendingUntil.TryGetValue("nightmare-chica", out var until) && until > _seconds && !_resolved.Contains("nightmare-chica"),
         "scan" => _owned.Contains("scrap-baby") || _owned.Contains("pee-monster"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby") || _owned.Contains("pee-monster"), _ => false
     };

@@ -1,2 +1,3 @@
 *.exe filter=lfs diff=lfs merge=lfs -text
 *.wav filter=lfs diff=lfs merge=lfs -text
+fazbear-pizzeria-sim/release/ULTIMATE-FAZ-1.6-fixed.zip filter=lfs diff=lfs merge=lfs -text

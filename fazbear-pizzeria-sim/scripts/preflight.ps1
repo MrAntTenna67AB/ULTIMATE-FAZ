@@ -14,6 +14,7 @@ foreach($g in $games.games) {
     if($g.steamAppId -ne 'custom' -or $null -ne $g.slug) { $errors.Add("games.$($g.id): custom roster groups must not claim a real game") }
   } elseif($g.steamAppId -notmatch '^\d+$') { $errors.Add("games.$($g.id): bad Steam app id") }
 }
+$slotSeen = @{}
 foreach($a in $anim.animatronics) {
   foreach($field in @('id','name','gameId','rule','action')) { if([string]::IsNullOrWhiteSpace([string]$a.$field)) { $errors.Add("animatronics.$($a.id): missing $field") } }
   if($a.gameId -notin $gameIds) { $errors.Add("animatronics.$($a.id): unresolved game $($a.gameId)") }
@@ -22,6 +23,12 @@ foreach($a in $anim.animatronics) {
   if($a.action -in @('door','listen') -and $a.doorSide -notin @('left','right')) { $errors.Add("animatronics.$($a.id): door threat must name left or right side") }
   foreach($field in @('atmosphere','healthSafety','entertainment','bonusRevenue')) { if($null -eq $a.$field -or ($field -ne 'healthSafety' -and $a.$field -lt 0)) { $errors.Add("animatronics.$($a.id): missing or invalid rating field $field") } }
   if(-not (Test-Path -LiteralPath (Join-Path $root "assets\portraits\$($a.id).png"))) { $errors.Add("animatronics.$($a.id): missing matching portrait asset assets/portraits/$($a.id).png") }
+  $slot = if ($null -ne $a.rosterSlot) { [int]$a.rosterSlot } else { -1 }
+  if($slot -lt -1 -or $slot -gt 11) { $errors.Add("animatronics.$($a.id): rosterSlot must be 0-11") }
+  if($slot -ge 0) {
+    $slotKey = "$($a.gameId)/$slot"
+    if($slotSeen.ContainsKey($slotKey)) { $errors.Add("animatronics.$($a.id): rosterSlot $slot already used in $($a.gameId)") } else { $slotSeen[$slotKey] = $true }
+  }
 }
 foreach($a in $attractions.attractions) {
   foreach($field in @('id','name','category','description','style')) { if([string]::IsNullOrWhiteSpace([string]$a.$field)) { $errors.Add("attractions.$($a.id): missing $field") } }
