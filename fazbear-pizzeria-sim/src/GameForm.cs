@@ -470,7 +470,7 @@ internal sealed class GameForm : Form
         DrawButton(g, _menuStartRect, "SAVE SLOTS", "→", _gold, Color.FromArgb(47, 35, 19), true);
         _menuSettingsRect = new RectangleF(434, 485, 220, 58);
         DrawButton(g, _menuSettingsRect, "SETTINGS", "⚙", _teal, Color.FromArgb(22, 28, 29), true);
-        DrawText(g, "A SOLO FNAF MASHUP TEST BUILD", _smallFont, _muted, 90, 568);
+        DrawText(g, "A SOLO FNAF MASHUP", _smallFont, _muted, 90, 568);
         DrawText(g, "ESC  QUIT", _smallFont, Color.FromArgb(106, 115, 110), 48, 694);
         DrawText(g, "F11  WINDOWED / FULLSCREEN", _smallFont, Color.FromArgb(106, 115, 110), 1010, 694, 220, 18, StringAlignment.Far);
         var marquee = new RectangleF(790, 145, 418, 326);
@@ -2388,6 +2388,17 @@ internal sealed class GameForm : Form
                     Invalidate();
                     return;
                 }
+                if (a.Id.Equals("balloon-boy", StringComparison.OrdinalIgnoreCase) && !WasHandled(a))
+                {
+                    _doorPower = 0;
+                    _lastResolved = "Balloon Boy stole all your power";
+                    _message = _lastResolved + ". Doors, monitor, and lights are down until power recovers.";
+                    NightSounds.Play("powerdown");
+                    ResetAnimatronicToStage(a.Id);
+                    _resolved.Add(a.Id); _pendingUntil.Remove(a.Id); _listening = false; _ventScanned = false;
+                    Invalidate();
+                    continue;
+                }
                 if (WasHandled(a)) { _score += 100 + _ai[a.Id] * 5; _lastResolved = $"{a.Name} returned to the stage"; _message = _lastResolved + ". Stay alert."; ResetAnimatronicToStage(a.Id); }
                 else
                 {
@@ -2915,9 +2926,9 @@ internal sealed class GameForm : Form
         _activeOfficeTaskId = null;
         _officeTaskSecondsRemaining = 0;
         _monitorOpen = false;
-        _cheatToastMessage = "TEST CODE ACCEPTED · NIGHT SKIPPED";
+        _cheatToastMessage = "CHEAT CODE ACCEPTED · NIGHT SKIPPED";
         _cheatToastUntilUtc = DateTime.UtcNow.AddSeconds(3);
-        _message = "Night skipped for testing.";
+        _message = "Night skipped.";
         FinishNight(true);
         return true;
     }
