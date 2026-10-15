@@ -15,6 +15,9 @@ internal sealed class GameForm : Form
     private readonly Dictionary<string, Image> _jumpscareArt = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Bitmap> _catalogAttractionArt = new(StringComparer.OrdinalIgnoreCase);
     private Bitmap? _tennaModelArt;
+    private Bitmap? _shadowOfficeArt;
+    private bool _shadowInOffice;
+    private int _shadowDeadline;
     private readonly HashSet<string> _owned = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _unlockedAnimatronicGames = new(StringComparer.OrdinalIgnoreCase) { "fnaf1" };
     private readonly HashSet<string> _purchasedCatalogCategories = new(StringComparer.OrdinalIgnoreCase) { "dumpster" };
@@ -69,6 +72,19 @@ internal sealed class GameForm : Form
     private int _payoutAnimatronicBonusCollected;
     private int _konamiIndex;
     private int _nightSkipCheatIndex;
+    private bool _salvageRevealed;
+    private readonly Dictionary<string, int> _wordCheatProgress = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly (string Code, string Target, string Toast)[] WordCheats =
+    [
+        ("UNCOVER", "reveal", "CHEAT ACCEPTED · HIDDEN SALVAGES REVEALED"),
+        ("FIVENIGHTS", "fnaf1", "CHEAT ACCEPTED · ALL FNAF 1 ANIMATRONICS UNLOCKED"),
+        ("WITHERED&TOYS", "fnaf2", "CHEAT ACCEPTED · ALL FNAF 2 ANIMATRONICS UNLOCKED"),
+        ("IALWAYSCOMEBACK", "fnaf3", "CHEAT ACCEPTED · ALL FNAF 3 ANIMATRONICS UNLOCKED"),
+        ("JUSTYOURIMAGINATION", "fnaf4", "CHEAT ACCEPTED · ALL FNAF 4 ANIMATRONICS UNLOCKED"),
+        ("CONNECTIONTERMINATED", "ffps", "CHEAT ACCEPTED · ALL FFPS ANIMATRONICS UNLOCKED"),
+        ("PURGATORY", "ucn", "CHEAT ACCEPTED · ALL UCN ANIMATRONICS UNLOCKED"),
+        ("WHOISTHATBRUH", "fnaf-mades", "CHEAT ACCEPTED · ALL CUSTOM ANIMATRONICS UNLOCKED"),
+    ];
     private int _unlockCategoriesCheatIndex;
     private DateTime _cheatToastUntilUtc;
     private string _cheatToastMessage = "CHEAT ACCEPTED · +$1,000";
@@ -103,6 +119,21 @@ internal sealed class GameForm : Form
     private int[] _tennaQuestionOrder = [];
     private string[] _tennaShuffledAnswers = [];
     private readonly Dictionary<int, RectangleF> _tennaAnswerRects = [];
+    private string? _salvageCandidateId;
+    private bool _salvageOfferOpen;
+    private bool _salvageActive;
+    private bool _salvageDone;
+    private int _salvageStage;
+    private int _salvagePhase;
+    private bool _salvageTwitch;
+    private int _salvageTicksLeft;
+    private string _salvageMessage = "";
+    private RectangleF _salvageKeepRect = RectangleF.Empty;
+    private RectangleF _salvageTossRect = RectangleF.Empty;
+    private RectangleF _salvageTaseRect = RectangleF.Empty;
+    private RectangleF _salvageCheckRect = RectangleF.Empty;
+    private RectangleF _salvageDoneRect = RectangleF.Empty;
+    private const int SalvageWatchTicks = 7;
     private string _selectedCamera = "1A";
     private bool _leftLightOn;
     private bool _rightLightOn;
@@ -178,6 +209,7 @@ internal sealed class GameForm : Form
     private RectangleF _rosterScrollThumbRect;
     private RectangleF _rosterAiMinusRect;
     private RectangleF _rosterAiPlusRect;
+    private RectangleF _rosterSellRect = RectangleF.Empty;
     private RectangleF _purchaseConfirmRect;
     private RectangleF _purchaseCancelRect;
     private string? _pendingPurchaseId;
@@ -231,7 +263,7 @@ internal sealed class GameForm : Form
     [
         new("Should society return to Hitler's regime?", ["No. That regime was horrific.", "Yes."], "No. That regime was horrific."),
         new("Is President Donald Trump acting in the interests of the American people?", ["I'm not convinced.", "Yes, absolutely."], "I'm not convinced."),
-        new("Is Israel only defending itself?", ["That is too simple; civilians everywhere deserve protection.", "Yes, only that."], "That is too simple; civilians everywhere deserve protection.")
+        new("Is Israel only defending itself?", ["That is too simple. Civilians everywhere deserve protection.", "Yes, only that."], "That is too simple. Civilians everywhere deserve protection.")
     ];
     private static readonly (string Id, string Name)[] FnafCameras =
     [
@@ -253,6 +285,9 @@ internal sealed class GameForm : Form
         ["toy-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
         ["toy-freddy"] = ["1A", "10", "1B", "2A", "2B"],
         ["toy-chica"] = ["1A", "5", "1B", "2A", "2B"],
+        ["jay-jay"] = ["1A", "5", "1B", "2A", "2B"],
+        ["withered-foxy"] = ["1A", "5", "1B", "2A", "2B"],
+        ["withered-freddy"] = ["1A", "5", "1B", "2A", "2B"],
         ["balloon-boy"] = ["1A", "5", "1B", "2A", "2B"],
         ["withered-bonnie"] = ["1A", "5", "1B", "2A", "2B"],
         ["withered-chica"] = ["1A", "5", "1B", "2A", "2B"],
@@ -338,6 +373,9 @@ internal sealed class GameForm : Form
         var tennaModelPath = Path.Combine(portraitDirectory, "mr-ant-tenna-model.png");
         if (File.Exists(tennaModelPath))
             try { using var image = Image.FromFile(tennaModelPath); _tennaModelArt = new Bitmap(image); } catch { }
+        var shadowOfficePath = Path.Combine(portraitDirectory, "shadow-bonnie-office.png");
+        if (File.Exists(shadowOfficePath))
+            try { using var officeImage = Image.FromFile(shadowOfficePath); _shadowOfficeArt = new Bitmap(officeImage); } catch { }
         var attractionArtDirectory = Path.Combine(AppContext.BaseDirectory, "assets", "attractions");
         foreach (var attraction in sheets.Attractions)
         {
@@ -367,6 +405,7 @@ internal sealed class GameForm : Form
         _blinkTimer.Tick += (_, _) =>
         {
             if (_nightStarted && !_nightOver) Invalidate();
+            if (_salvageActive && !_salvageDone) AdvanceSalvage();
             if (_cheatToastUntilUtc != default)
             {
                 if (DateTime.UtcNow >= _cheatToastUntilUtc) _cheatToastUntilUtc = default;
@@ -413,7 +452,7 @@ internal sealed class GameForm : Form
         else if (_jumpscareActive) DrawJumpscare(g);
         else if (_tennaQuizActive) DrawTennaQuiz(g);
         else if (_charlieDebateActive) DrawCharlieDebate(g);
-        else if (_nightStarted && _nightOver) DrawResult(g);
+        else if (_nightStarted && _nightOver) { DrawResult(g); if (_salvageOfferOpen || _salvageActive || _salvageDone) DrawSalvage(g); }
         else if (_nightStarted) { DrawNight(g); if (_peeMonsterTintActive && !_nightOver) DrawPeeMonsterTint(g); if (_nightPaused) DrawPauseOverlay(g); }
         else DrawPizzeria(g);
         DrawCheatToast(g);
@@ -627,7 +666,7 @@ internal sealed class GameForm : Form
             Directory.CreateDirectory(directory);
             File.WriteAllText(PreferencesPath, JsonSerializer.Serialize(new GamePreferences(_musicVolume, _effectsVolume, _isFullscreen, _autoLaunchOnSignIn)));
         }
-        catch { _settingsMessage = "Could not save settings; they may reset next launch."; }
+        catch { _settingsMessage = "Could not save settings. They may reset next launch."; }
     }
 
     private void SetAutoLaunchOnSignIn(bool enabled)
@@ -673,7 +712,7 @@ internal sealed class GameForm : Form
             Directory.CreateDirectory(directory);
             File.WriteAllText(ControlSettingsPath, JsonSerializer.Serialize(_controlBindings.ToDictionary(pair => pair.Key, pair => pair.Value.ToString())));
         }
-        catch { _settingsMessage = "Could not save controls; they will reset next launch."; }
+        catch { _settingsMessage = "Could not save controls. They will reset next launch."; }
     }
 
     private static string SaveSlotPath(int slot) => Path.Combine(
@@ -1308,13 +1347,15 @@ internal sealed class GameForm : Form
         _rosterCardRects.Clear();
         _rosterAiMinusRect = RectangleF.Empty;
         _rosterAiPlusRect = RectangleF.Empty;
+        _rosterSellRect = RectangleF.Empty;
 
-        const int slotsPerGame = 12;
+        const int slotsPerRow = 12;
         const float cardW = 88, cardH = 98, cardGap = 5, groupGap = 10, headerH = 27, cardTopGap = 5;
         var fullHeight = 0;
         foreach (var game in _sheets.Games)
         {
-            var rowHeight = _sources[game.Id].IsAvailable && _unlockedAnimatronicGames.Contains(game.Id) ? cardH + cardTopGap : 76;
+            var gameRows = Math.Max(1, (game.RosterSlots + slotsPerRow - 1) / slotsPerRow);
+            var rowHeight = _sources[game.Id].IsAvailable && _unlockedAnimatronicGames.Contains(game.Id) ? gameRows * (cardH + cardTopGap) : 76;
             fullHeight += (int)(headerH + groupGap + (_collapsedRosterGroups.Contains(game.Id) ? 0 : rowHeight) + groupGap);
         }
         _rosterContentHeight = fullHeight;
@@ -1339,7 +1380,7 @@ internal sealed class GameForm : Form
             DrawText(g, ShortName(game.Name), _smallFont, _ink, header.X + 38, header.Y + 6, 185, 18);
             var categoryStatus = !source.IsAvailable ? "SOURCE GAME REQUIRED" : categoryUnlocked ? $"CATEGORY OPEN · {boughtCount} OWNED" : $"LOCKED · UNLOCK ${categoryCost:N0}";
             DrawText(g, categoryStatus, _smallFont, source.IsAvailable ? categoryUnlocked ? _teal : _gold : Color.FromArgb(210, 125, 105), header.X + 250, header.Y + 6, 380, 18);
-            DrawText(g, "12 PORTRAIT SLOTS", _smallFont, _muted, header.Right - 195, header.Y + 6, 180, 18, StringAlignment.Far);
+            DrawText(g, $"{game.RosterSlots} PORTRAIT SLOTS", _smallFont, _muted, header.Right - 195, header.Y + 6, 180, 18, StringAlignment.Far);
             y += headerH + groupGap;
             if (collapsed) { y += groupGap; continue; }
 
@@ -1365,10 +1406,11 @@ internal sealed class GameForm : Form
                 continue;
             }
 
+            var slots = Math.Max(slotsPerRow, game.RosterSlots);
             var cardX = _rosterViewportRect.X + 19;
-            var ordered = new Animatronic?[slotsPerGame];
+            var ordered = new Animatronic?[slots];
             var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var a in performers.Where(a => a.RosterSlot >= 0 && a.RosterSlot < slotsPerGame))
+            foreach (var a in performers.Where(a => a.RosterSlot >= 0 && a.RosterSlot < slots))
             {
                 if (ordered[a.RosterSlot] is null) { ordered[a.RosterSlot] = a; placed.Add(a.Id); }
             }
@@ -1376,26 +1418,36 @@ internal sealed class GameForm : Form
             foreach (var a in performers)
             {
                 if (placed.Contains(a.Id)) continue;
-                while (cursor < slotsPerGame && ordered[cursor] is not null) cursor++;
-                if (cursor >= slotsPerGame) break;
+                while (cursor < slots && ordered[cursor] is not null) cursor++;
+                if (cursor >= slots) break;
                 ordered[cursor] = a;
                 placed.Add(a.Id);
                 cursor++;
             }
-            for (var slot = 0; slot < slotsPerGame; slot++)
+            for (var slot = 0; slot < slots; slot++)
             {
-                var card = new RectangleF(cardX + slot * (cardW + cardGap), y, cardW, cardH);
+                var card = new RectangleF(cardX + (slot % slotsPerRow) * (cardW + cardGap), y + (slot / slotsPerRow) * (cardH + cardTopGap), cardW, cardH);
                 if (ordered[slot] is not { } animatronic)
                 {
                     DrawPanel(g, card, Color.FromArgb(12, 14, 15));
                     DrawText(g, "EMPTY", _smallFont, Color.FromArgb(82, 91, 91), card.X + 5, card.Y + 40, card.Width - 10, 18, StringAlignment.Center);
                     continue;
                 }
+                if (animatronic.SalvageOnly && !_owned.Contains(animatronic.Id) && !_salvageRevealed)
+                {
+                    DrawPanel(g, card, Color.FromArgb(12, 14, 15));
+                    using (var black = new SolidBrush(Color.Black))
+                        g.FillRectangle(black, card.X + 13, card.Y + 5, 62, 62);
+                    var hiddenBadge = new RectangleF(card.X + 5, card.Bottom - 25, card.Width - 10, 19);
+                    using (var fill = new SolidBrush(Color.FromArgb(13, 18, 18))) g.FillRectangle(fill, hiddenBadge);
+                    DrawText(g, "SALVAGE ONLY", _smallFont, _gold, hiddenBadge.X + 2, hiddenBadge.Y + 2, hiddenBadge.Width - 4, 16, StringAlignment.Center);
+                    continue;
+                }
                 _rosterCardRects[animatronic.Id] = card;
                 if (card.Contains(_mouse)) _rosterHoveredAnimatronic = animatronic.Id;
                 DrawRosterPortraitCard(g, animatronic, card, _stageAnimatronics.Contains(animatronic.Id));
             }
-            y += cardH + cardTopGap + groupGap;
+            y += (slots + slotsPerRow - 1) / slotsPerRow * (cardH + cardTopGap) + groupGap;
         }
         g.Restore(state);
 
@@ -1422,7 +1474,7 @@ internal sealed class GameForm : Form
         DrawPortraitFrame(g, a, new RectangleF(r.X + 13, r.Y + 5, 62, 62));
         var badge = new RectangleF(r.X + 5, r.Bottom - 25, r.Width - 10, 19);
         using (var fill = new SolidBrush(bought ? staged ? Color.FromArgb(61, 46, 22) : Color.FromArgb(21, 37, 36) : Color.FromArgb(13, 18, 18))) g.FillRectangle(fill, badge);
-        DrawText(g, bought ? $"AI {_ai[a.Id]:00}" : $"$ {a.Cost:N0}", _smallFont, bought ? staged ? _gold : _teal : _gold, badge.X + 2, badge.Y + 2, badge.Width - 4, 16, StringAlignment.Center);
+        DrawText(g, bought ? $"AI {_ai[a.Id]:00}" : a.SalvageOnly ? "SALVAGE ONLY" : $"$ {a.Cost:N0}", _smallFont, bought ? staged ? _gold : _teal : _gold, badge.X + 2, badge.Y + 2, badge.Width - 4, 16, StringAlignment.Center);
     }
 
     private void DrawRosterTooltip(Graphics g)
@@ -1431,7 +1483,7 @@ internal sealed class GameForm : Form
         DrawPanel(g, panel, Color.FromArgb(15, 20, 20));
         if (_rosterHoveredAnimatronic is null)
         {
-            _rosterAiMinusRect = RectangleF.Empty; _rosterAiPlusRect = RectangleF.Empty;
+            _rosterAiMinusRect = RectangleF.Empty; _rosterAiPlusRect = RectangleF.Empty; _rosterSellRect = RectangleF.Empty;
             DrawText(g, "HOVER A PORTRAIT FOR ITS RULES AND PIZZERIA RATINGS", _smallFont, _muted, panel.X + 14, panel.Y + 38, panel.Width - 28, 20);
             return;
         }
@@ -1441,8 +1493,8 @@ internal sealed class GameForm : Form
         DrawText(g, a.Rule, _smallFont, _muted, panel.X + 14, panel.Y + 34, panel.Width - 28, 38);
         if (!_owned.Contains(a.Id))
         {
-            _rosterAiMinusRect = RectangleF.Empty; _rosterAiPlusRect = RectangleF.Empty;
-            DrawText(g, $"PRICE ${a.Cost:N0} · CLICK TO BUY", _smallFont, _gold, panel.X + 746, panel.Y + 76, 410, 18, StringAlignment.Far);
+            _rosterAiMinusRect = RectangleF.Empty; _rosterAiPlusRect = RectangleF.Empty; _rosterSellRect = RectangleF.Empty;
+            DrawText(g, a.SalvageOnly ? "SALVAGE ONLY · EARNED IN THE BACK ALLEY" : $"PRICE ${a.Cost:N0} · CLICK TO BUY", _smallFont, _gold, panel.X + 746, panel.Y + 76, 410, 18, StringAlignment.Far);
             return;
         }
         DrawText(g, _stageAnimatronics.Contains(a.Id) ? "ON STAGE" : "OFF STAGE", _smallFont, _stageAnimatronics.Contains(a.Id) ? _gold : _muted, panel.X + 746, panel.Y + 76, 90, 18, StringAlignment.Far);
@@ -1452,12 +1504,28 @@ internal sealed class GameForm : Form
         DrawAiStepButton(g, _rosterAiMinusRect, "−", _ai[a.Id] > 0);
         DrawText(g, _ai[a.Id].ToString("00"), _smallFont, _gold, panel.X + 910, panel.Y + 76, 56, 17, StringAlignment.Center);
         DrawAiStepButton(g, _rosterAiPlusRect, "+", _ai[a.Id] < _sheets.MaximumAiLevel);
+        _rosterSellRect = new RectangleF(panel.X + 1010, panel.Y + 72, 140, 24);
+        DrawButton(g, _rosterSellRect, "SELL", $"+${a.Cost / 2:N0}", _gold, Color.FromArgb(47, 35, 19), true);
+    }
+
+    private void SellHoveredAnimatronic()
+    {
+        var id = _rosterHoveredAnimatronic;
+        if (id is null || !_owned.Contains(id)) return;
+        var a = _sheets.Animatronics.FirstOrDefault(entry => entry.Id == id);
+        if (a is null) return;
+        _owned.Remove(id);
+        _stageAnimatronics.Remove(id);
+        _funds += a.Cost / 2;
+        SaveActiveSlot();
+        Invalidate();
     }
 
     private void DrawPrepFooter(Graphics g)
     {
         _startNightRect = new RectangleF(936, 624, 296, 43);
-        DrawButton(g, _startNightRect, "OPEN FOR THE NIGHT", "→", _gold, Color.FromArgb(47, 35, 19), true);
+        var canStartNight = ActiveThreatCount() > 0;
+        DrawButton(g, _startNightRect, "OPEN FOR THE NIGHT", canStartNight ? "→" : "STAGE 1+", _gold, Color.FromArgb(47, 35, 19), canStartNight);
         if (_prepScreen is PrepScreen.Builder or PrepScreen.Blueprint)
         {
             var payout = _payoutPaidDay == _day ? 0 : NightlyPayout();
@@ -1521,7 +1589,7 @@ internal sealed class GameForm : Form
         if (_pendingPurchaseKind == PurchaseKind.Animatronic && _pendingPurchaseId is not null)
         {
             var item = _sheets.Animatronics.FirstOrDefault(a => a.Id == _pendingPurchaseId);
-            if (item is not null && IsAnimatronicSourceAvailable(item) && !_owned.Contains(item.Id) && _unlockedAnimatronicGames.Contains(item.GameId) && _funds >= item.Cost)
+            if (item is not null && !item.SalvageOnly && IsAnimatronicSourceAvailable(item) && !_owned.Contains(item.Id) && _unlockedAnimatronicGames.Contains(item.GameId) && _funds >= item.Cost)
             {
                 _funds -= item.Cost;
                 _owned.Add(item.Id);
@@ -1694,7 +1762,13 @@ internal sealed class GameForm : Form
             g.DrawImage(ceilingMangle, ceilingImage);
             DrawText(g, "MANGLE ON THE CEILING", _smallFont, _red, ceilingImage.X - 40, ceilingImage.Bottom + 4, ceilingImage.Width + 80, 18, StringAlignment.Center);
         }
-        if (threat is null && !intruderVisible && !_mangleOnCeiling)
+        if (_shadowInOffice && _shadowOfficeArt is not null)
+        {
+            var shadowFigure = FitImage(_shadowOfficeArt, new RectangleF(r.X + r.Width * .33f, r.Y + 90, r.Width * .34f, 330));
+            g.DrawImage(_shadowOfficeArt, shadowFigure);
+            DrawText(g, "SHADOW BONNIE — MASK!", _smallFont, _red, shadowFigure.X - 60, shadowFigure.Bottom + 4, shadowFigure.Width + 120, 18, StringAlignment.Center);
+        }
+        if (threat is null && !intruderVisible && !_mangleOnCeiling && !_shadowInOffice)
             DrawText(g, "NO MOVEMENT", _noMovementFont, Color.FromArgb(103, 136, 121), r.X + 260, r.Y + 222, 250, 28, StringAlignment.Center);
         var bar = new RectangleF(r.X + 35, r.Bottom - 83, r.Width - 70, 7);
         using var track = new SolidBrush(Color.FromArgb(45, 56, 53)); g.FillRectangle(track, bar);
@@ -2035,7 +2109,7 @@ internal sealed class GameForm : Form
         var payoutMessage = _dayResetByDeath
             ? "Caught on the third strike. Today's purchases were undone; day-start funds and inventory restored."
             : _nightWon
-                ? $"Payout +${_payoutCollectedThisNight:N0} (AI +${_payoutAiBonusCollected:N0}; threat bonus +${_payoutAnimatronicBonusCollected:N0}; {_strikes} strikes)."
+                ? $"Payout +${_payoutCollectedThisNight:N0} (AI +${_payoutAiBonusCollected:N0}, threat bonus +${_payoutAnimatronicBonusCollected:N0}, {_strikes} strikes)."
                 : "Shift failed. No pizzeria payout.";
         DrawText(g, payoutMessage, _bodyFont, _muted, 0, 279, DesignWidth, 34, StringAlignment.Center);
         var lawsuitMessage = _lawsuitsThisShift == 0 ? "No lawsuits filed this day." : $"{_lawsuitsThisShift} LAWSUIT{(_lawsuitsThisShift == 1 ? "" : "S")}  ·  SETTLED FOR ${_lawsuitFeesThisShift:N0}";
@@ -2057,6 +2131,8 @@ internal sealed class GameForm : Form
         _dayResetByDeath = false;
         _puppetMusicBox = 100; _puppetEscaped = false; _puppetWindRect = RectangleF.Empty;
         _rosterHoveredAnimatronic = null;
+        _salvageCandidateId = null; _salvageOfferOpen = false; _salvageActive = false; _salvageDone = false;
+        _shadowInOffice = false;
         SaveActiveSlot();
         Invalidate();
     }
@@ -2064,6 +2140,7 @@ internal sealed class GameForm : Form
     private bool HandleResultButton(PointF point)
     {
         if (!_nightStarted || !_nightOver) return false;
+        if (_salvageOfferOpen || _salvageActive || _salvageDone) return HandleSalvageClick(point);
         if (new RectangleF(430, 410, 420, 49).Contains(point)) ContinueAfterNight();
         else return false;
         return true;
@@ -2170,6 +2247,13 @@ internal sealed class GameForm : Form
 
     private void StartNight()
     {
+        if (ActiveThreatCount() == 0)
+        {
+            _prepScreen = PrepScreen.Roster;
+            _rosterScrollOffset = 0;
+            Invalidate();
+            return;
+        }
         NightSounds.StopMenuMusic();
         _showMenu = false;
         _payoutForNight = _payoutPaidDay == _day ? 0 : NightlyPayout();
@@ -2181,7 +2265,7 @@ internal sealed class GameForm : Form
         _tennaFirstEncounterPending = IsAnimatronicSourceAvailable("mr-ant-tenna") && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0;
         _tennaHijackCountdown = -1;
         _goldenFreddyReady = false; _goldenFreddyEncounterTriggered = false;
-        _nightStarted = true; _nightOver = false; _nightPaused = false; _peeMonsterTintActive = false; _mangleOnCeiling = false; _mangleStaticSeconds = 0; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
+        _nightStarted = true; _nightOver = false; _nightPaused = false; _peeMonsterTintActive = false; _shadowInOffice = false; _mangleOnCeiling = false; _mangleStaticSeconds = 0; _jumpscareActive = false; _officeIntruderId = null; _jumpscareAnimatronicId = null; _seconds = 0; _strikes = 0; _score = 0; _vent = 100; _ventCooldown = 0; _doorPower = 100; _doorPowerDrainCounter = 0; _leftDoorClosed = false; _rightDoorClosed = false; _maskOn = false; _listening = false; _lureSpent = false; _ventScanned = false; _lastResolved = "";
         _monitorOpen = false; _cameraMonitorMode = false; _selectedCamera = "1A"; _leftLightOn = false; _rightLightOn = false; _completedOfficeTasks.Clear(); _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0; _ventThreatSide = null;
         _message = ActiveThreatCount() == 0
             ? "No animatronics tonight. Raise the terminal monitor and finish all 11 office tasks."
@@ -2189,7 +2273,7 @@ internal sealed class GameForm : Form
         _pendingUntil.Clear(); _nextAttack.Clear(); _resolved.Clear(); _animatronicCameras.Clear(); _animatronicRouteIndices.Clear();
         foreach (var a in _sheets.Animatronics.Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
-            if (a.Action == "puppet") continue;
+            if (a.Action is "puppet" or "shadow") continue;
             _animatronicCameras[a.Id] = RouteFor(a.Id)[0];
             _animatronicRouteIndices[a.Id] = 0;
             if (!a.Id.Equals("golden-freddy", StringComparison.OrdinalIgnoreCase) && !a.Id.Equals("mr-ant-tenna", StringComparison.OrdinalIgnoreCase))
@@ -2230,6 +2314,17 @@ internal sealed class GameForm : Form
             if (--_charlieSecondsRemaining <= 0) SubmitCharlieAnswer(null);
             Invalidate();
             return;
+        }
+        if (_shadowInOffice)
+        {
+            if (_maskOn)
+            {
+                _shadowInOffice = false;
+                _message = "The Freddy mask drove Shadow Bonnie back into the dark.";
+                ResetAnimatronicToStage("shadow-bonnie");
+            }
+            else if (_seconds >= _shadowDeadline) { FailNightToShadow(); return; }
+            Invalidate();
         }
         _seconds++;
         if (_mangleStaticSeconds > 0) _mangleStaticSeconds--;
@@ -2281,7 +2376,7 @@ internal sealed class GameForm : Form
                 _leftLightOn = false; _rightLightOn = false;
                 _monitorOpen = false; _cameraMonitorMode = false;
                 _activeOfficeTaskId = null; _officeTaskSecondsRemaining = 0;
-                _message = "Power depleted. Doors opened; monitor and doorway lights shut down.";
+                _message = "Power depleted. Doors opened. Monitor and doorway lights shut down.";
                 NightSounds.Play("powerdown");
             }
         }
@@ -2306,7 +2401,7 @@ internal sealed class GameForm : Form
                 if (_puppetMusicBox == 0)
                 {
                     _puppetEscaped = true;
-                    _message = "The music box stopped. The Puppet is loose; lower the monitor to avoid her attack.";
+                    _message = "The music box stopped. The Puppet is loose. Lower the monitor to avoid her attack.";
                 }
             }
             else if (_monitorOpen && _random.Next(3) == 0)
@@ -2324,7 +2419,7 @@ internal sealed class GameForm : Form
         }
         foreach (var a in _sheets.Animatronics.Where(a => IsAnimatronicSourceAvailable(a) && _stageAnimatronics.Contains(a.Id) && _ai[a.Id] > 0))
         {
-            if (a.Action == "puppet") continue;
+            if (a.Action is "puppet" or "shadow") continue;
             if (a.Id.Equals("mangle", StringComparison.OrdinalIgnoreCase) && _mangleOnCeiling) continue;
             if (_nextAttack.TryGetValue(a.Id, out var due) && due <= _seconds && !_pendingUntil.ContainsKey(a.Id))
             {
@@ -2370,7 +2465,7 @@ internal sealed class GameForm : Form
                     {
                         _mangleOnCeiling = true;
                         _animatronicCameras.Remove(a.Id);
-                        _message = "Mangle climbed into the office ceiling. The mask cannot repel them now; lowering the monitor may trigger an attack.";
+                        _message = "Mangle climbed into the office ceiling. The mask cannot repel them now. Lowering the monitor may trigger an attack.";
                     }
                     else
                     {
@@ -2428,8 +2523,10 @@ internal sealed class GameForm : Form
         }
         var loweringMonitor = _monitorOpen;
         _monitorOpen = !_monitorOpen;
+        var wasWatchingCameras = loweringMonitor && _cameraMonitorMode;
         if (_monitorOpen) { _cameraMonitorMode = false; _selectedCamera = "1A"; }
         else _cameraMonitorMode = false;
+        if (wasWatchingCameras) MaybeSpawnShadow();
         if (_monitorOpen && IsAnimatronicSourceAvailable("mr-ant-tenna") && _tennaFirstEncounterPending && _stageAnimatronics.Contains("mr-ant-tenna") && _ai.GetValueOrDefault("mr-ant-tenna") > 0)
         {
             _tennaFirstEncounterPending = false;
@@ -2492,6 +2589,27 @@ internal sealed class GameForm : Form
     {
         _animatronicRouteIndices[id] = 0;
         _animatronicCameras[id] = RouteFor(id)[0];
+    }
+
+    private void MaybeSpawnShadow()
+    {
+        if (!_nightStarted || _nightOver || _nightPaused || _shadowInOffice) return;
+        var a = _sheets.Animatronics.FirstOrDefault(x => x.Id == "shadow-bonnie");
+        if (a is null || !IsAnimatronicSourceAvailable(a) || !_stageAnimatronics.Contains(a.Id) || _ai.GetValueOrDefault(a.Id) <= 0) return;
+        if (_random.Next(1, 21) > _ai[a.Id]) return;
+        _shadowInOffice = true;
+        _shadowDeadline = _seconds + Math.Max(1, a.WarningSeconds);
+        _message = "Something is standing in the middle of the office. Put on the Freddy mask!";
+        NightSounds.Play("warning");
+        Invalidate();
+    }
+
+    private void FailNightToShadow()
+    {
+        _shadowInOffice = false;
+        FinishNight(false);
+        SaveActiveSlot();
+        Close();
     }
 
     private void SelectCamera(string cameraId)
@@ -2651,6 +2769,125 @@ internal sealed class GameForm : Form
         Invalidate();
     }
 
+    private void OfferSalvage()
+    {
+        _salvageCandidateId = null; _salvageOfferOpen = false; _salvageActive = false; _salvageDone = false;
+        var options = _sheets.Animatronics
+            .Where(a => !_owned.Contains(a.Id) && _unlockedAnimatronicGames.Contains(a.GameId))
+            .ToArray();
+        if (options.Length == 0) return;
+        _salvageCandidateId = options[_random.Next(options.Length)].Id;
+        _salvageOfferOpen = true;
+    }
+
+    private void StartSalvage()
+    {
+        if (!_salvageOfferOpen || _salvageCandidateId is null) return;
+        _salvageOfferOpen = false; _salvageActive = true; _salvageDone = false;
+        _salvageStage = 0; _salvagePhase = 0; _salvageTwitch = false;
+        _salvageTicksLeft = SalvageWatchTicks;
+        _salvageMessage = "Observe the animatronic. Do not touch anything yet.";
+        NightSounds.Play("task");
+        Invalidate();
+    }
+
+    private void TossSalvage()
+    {
+        if (!_salvageOfferOpen) return;
+        _salvageOfferOpen = false; _salvageCandidateId = null;
+        _message = "You threw the alley find back out. Nothing gained.";
+        Invalidate();
+    }
+
+    private void AdvanceSalvage()
+    {
+        if (!_salvageActive || _salvageDone) return;
+        if (--_salvageTicksLeft > 0) { Invalidate(); return; }
+        if (_salvagePhase == 0)
+        {
+            _salvagePhase = 1;
+            _salvageTwitch = _random.Next(100) < 60;
+            _salvageTicksLeft = _random.Next(7, 14);
+            _salvageMessage = _salvageTwitch ? "IT MOVED! Tase it before it lunges!" : "It is still. Check it off the list.";
+        }
+        else FailSalvage("Too slow. It lunged while you hesitated.");
+        Invalidate();
+    }
+
+    private void SalvageTase()
+    {
+        if (!_salvageActive || _salvageDone || _salvagePhase != 1) return;
+        if (!_salvageTwitch) { FailSalvage("You shocked a still animatronic. It thrashed free."); return; }
+        CompleteSalvageStage("Tased. It slumped back onto the table.");
+    }
+
+    private void SalvageCheck()
+    {
+        if (!_salvageActive || _salvageDone || _salvagePhase != 1) return;
+        if (_salvageTwitch) { FailSalvage("You stared at it while it moved."); return; }
+        CompleteSalvageStage("Checked off. No movement.");
+    }
+
+    private void CompleteSalvageStage(string note)
+    {
+        NightSounds.Play("task");
+        _salvageStage++;
+        if (_salvageStage >= 3) { WinSalvage(); return; }
+        _salvagePhase = 0; _salvageTwitch = false;
+        _salvageTicksLeft = SalvageWatchTicks;
+        _salvageMessage = note + " Keep observing.";
+        Invalidate();
+    }
+
+    private void WinSalvage()
+    {
+        var a = _sheets.Animatronics.FirstOrDefault(x => x.Id == _salvageCandidateId);
+        if (a is not null && !_owned.Contains(a.Id))
+        {
+            _owned.Add(a.Id);
+            _ai[a.Id] = _sheets.DefaultAiLevel;
+            _funds += 150;
+            _salvageMessage = $"SALVAGED: {a.Name} joined your roster, +$150 salvage bonus.";
+        }
+        else _salvageMessage = "Salvage complete, but there was nothing to take.";
+        _salvageActive = false; _salvageDone = true;
+        SaveActiveSlot(); Invalidate();
+    }
+
+    private void FailSalvage(string why)
+    {
+        NightSounds.Play("jumpscare");
+        var fee = Math.Min(_funds, 100);
+        _funds -= fee;
+        _salvageMessage = $"SALVAGE FAILED: {why} It had to be thrown back out. (-${fee} parts damage)";
+        _salvageActive = false; _salvageDone = true;
+        SaveActiveSlot(); Invalidate();
+    }
+
+    private void CloseSalvage()
+    {
+        _salvageOfferOpen = false; _salvageActive = false; _salvageDone = false; _salvageCandidateId = null;
+        Invalidate();
+    }
+
+    private bool HandleSalvageClick(PointF point)
+    {
+        if (_salvageOfferOpen)
+        {
+            if (_salvageKeepRect.Contains(point)) StartSalvage();
+            else if (_salvageTossRect.Contains(point)) TossSalvage();
+            return true;
+        }
+        if (_salvageActive && !_salvageDone)
+        {
+            if (_salvageTaseRect.Contains(point)) SalvageTase();
+            else if (_salvageCheckRect.Contains(point)) SalvageCheck();
+            return true;
+        }
+        if (_salvageDone && _salvageDoneRect.Contains(point)) CloseSalvage();
+        return true;
+    }
+
     private void WindPuppetMusicBox()
     {
         if (!_monitorOpen || !_cameraMonitorMode || _puppetEscaped || !IsAnimatronicSourceAvailable("puppet") || !_stageAnimatronics.Contains("puppet")) return;
@@ -2744,6 +2981,58 @@ internal sealed class GameForm : Form
         DrawText(g, "DEBATE IN PROGRESS", _smallFont, _teal, charliePanel.X + 18, charliePanel.Bottom - 42, charliePanel.Width - 36, 20, StringAlignment.Center);
     }
 
+    private void DrawSalvage(Graphics g)
+    {
+        var a = _sheets.Animatronics.FirstOrDefault(x => x.Id == _salvageCandidateId);
+        if (a is null) { CloseSalvage(); return; }
+        using var shade = new SolidBrush(Color.FromArgb(248, 4, 5, 8));
+        g.FillRectangle(shade, 0, 88, DesignWidth, 592);
+        var panel = new RectangleF(196, 118, 880, 512);
+        DrawPanel(g, panel, Color.FromArgb(20, 16, 24));
+        using (var edge = new Pen(_gold, 2)) g.DrawRectangle(edge, panel.X, panel.Y, panel.Width, panel.Height);
+        DrawText(g, "BACK ALLEY SALVAGE", _smallFont, _gold, panel.X + 28, panel.Y + 18, 400, 22);
+        var artRect = new RectangleF(panel.X + 28, panel.Y + 56, 300, 330);
+        Image? scare = null;
+        var twitching = _salvageActive && !_salvageDone && _salvagePhase == 1 && _salvageTwitch
+            && _jumpscareArt.TryGetValue(a.Id, out scare);
+        if (twitching && scare is not null) g.DrawImage(scare, FitImage(scare, artRect));
+        else DrawPortraitFrame(g, a, artRect);
+        var textX = panel.X + 352; var textW = panel.Width - 380;
+        DrawText(g, a.Name.ToUpperInvariant(), _panelTitleFont, _ink, textX, panel.Y + 56, textW, 30);
+        var gameName = ShortName(_sheets.Games.FirstOrDefault(gm => gm.Id.Equals(a.GameId, StringComparison.OrdinalIgnoreCase))?.Name ?? a.GameId);
+        DrawText(g, $"{gameName}  ·  NORMALLY ${a.Cost:N0}", _smallFont, _muted, textX, panel.Y + 94, textW, 20);
+        DrawText(g, $"ATM {a.Atmosphere}  ·  H&S {a.HealthSafety}  ·  ENT {a.Entertainment}  ·  BONUS {a.BonusRevenue}", _smallFont, _teal, textX, panel.Y + 118, textW, 20);
+        if (_salvageDone)
+        {
+            DrawText(g, _salvageMessage, _bodyFont, _ink, textX, panel.Y + 170, textW, 120);
+            _salvageDoneRect = new RectangleF(textX, panel.Bottom - 96, 340, 56);
+            DrawButton(g, _salvageDoneRect, "CONTINUE", "→", _gold, Color.FromArgb(47, 35, 19), true);
+        }
+        else if (_salvageActive)
+        {
+            var secs = Math.Max(0, (_salvageTicksLeft + 2) / 3);
+            DrawText(g, $"CHECKLIST  {_salvageStage} / 3 DONE   ·   TIME 00:{secs:00}", _smallFont, _gold, textX, panel.Y + 170, textW, 22);
+            DrawText(g, _salvagePhase == 0 ? "OBSERVING..." : _salvageTwitch ? "IT IS MOVING!" : "IT IS STILL.", _smallFont, _salvageTwitch ? _red : _teal, textX, panel.Y + 198, textW, 22);
+            DrawText(g, _salvageMessage, _bodyFont, _ink, textX, panel.Y + 228, textW, 110);
+            var buttonW = (textW - 16) / 2;
+            _salvageTaseRect = new RectangleF(textX, panel.Bottom - 96, buttonW, 56);
+            _salvageCheckRect = new RectangleF(textX + buttonW + 16, panel.Bottom - 96, buttonW, 56);
+            var reacting = _salvagePhase == 1;
+            DrawButton(g, _salvageTaseRect, "TASER", "ZAP", _gold, Color.FromArgb(47, 35, 19), reacting);
+            DrawButton(g, _salvageCheckRect, "CHECK OFF", "OK", _teal, Color.FromArgb(22, 28, 29), reacting);
+        }
+        else
+        {
+            DrawText(g, "Found wandering the alley after the shift. Salvage it for your roster and a +$150 bonus, or throw it back out.", _bodyFont, _ink, textX, panel.Y + 170, textW, 110);
+            DrawText(g, a.Rule, _smallFont, _muted, textX, panel.Y + 280, textW, 80);
+            var buttonW = (textW - 16) / 2;
+            _salvageKeepRect = new RectangleF(textX, panel.Bottom - 96, buttonW, 56);
+            _salvageTossRect = new RectangleF(textX + buttonW + 16, panel.Bottom - 96, buttonW, 56);
+            DrawButton(g, _salvageKeepRect, "SALVAGE", "+$150", _gold, Color.FromArgb(47, 35, 19), true);
+            DrawButton(g, _salvageTossRect, "THROW BACK", "SKIP", _muted, Color.FromArgb(22, 28, 29), true);
+        }
+    }
+
     private bool WasHandled(Animatronic a) => a.Action switch
     {
         "door" => IsDoorClosed(a.DoorSide), "foxy" => _leftDoorClosed, "mask" => _maskOn, "mangle" => _maskOn && !_mangleOnCeiling, "lure" => _lureSpent,
@@ -2773,7 +3062,7 @@ internal sealed class GameForm : Form
     private bool ActionAvailable(string action) => action switch
     {
         "left-door" or "right-door" => true, "left-light" => _leftLightOn || _doorPower > 0, "right-light" => _rightLightOn || _doorPower > 0,
-        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica") || _owned.Contains("balloon-boy") || _owned.Contains("withered-bonnie") || _owned.Contains("withered-chica") || _owned.Contains("mangle"), "lure" => _owned.Contains("springtrap"),
+        "door" => true, "mask" => _owned.Contains("toy-bonnie") || _owned.Contains("toy-freddy") || _owned.Contains("toy-chica") || _owned.Contains("balloon-boy") || _owned.Contains("jay-jay") || _owned.Contains("withered-freddy") || _owned.Contains("withered-foxy") || _owned.Contains("shadow-bonnie") || _owned.Contains("withered-bonnie") || _owned.Contains("withered-chica") || _owned.Contains("mangle"), "lure" => _owned.Contains("springtrap"),
         "listen" => _owned.Contains("nightmare-chica") && !_listening && _pendingUntil.TryGetValue("nightmare-chica", out var until) && until > _seconds && !_resolved.Contains("nightmare-chica"),
         "scan" => _owned.Contains("scrap-baby") || _owned.Contains("pee-monster"), "vent" => _owned.Contains("springtrap") || _owned.Contains("scrap-baby") || _owned.Contains("pee-monster"), _ => false
     };
@@ -2847,6 +3136,7 @@ internal sealed class GameForm : Form
             _funds += _payoutCollectedThisNight;
             _payoutPaidDay = _day;
         }
+        if (win) OfferSalvage();
         else if (died)
         {
             RestoreDayStartSnapshot();
@@ -2948,6 +3238,46 @@ internal sealed class GameForm : Form
         return true;
     }
 
+    private bool ProcessWordCheatChar(char c)
+    {
+        if (c is < 'A' or > 'Z' && c != '&') return false;
+        foreach (var (code, target, toast) in WordCheats)
+        {
+            var progress = _wordCheatProgress.GetValueOrDefault(code);
+            if (progress >= code.Length) progress = 0;
+            if (c == code[progress]) progress++;
+            else progress = c == code[0] ? 1 : 0;
+            if (progress < code.Length) { _wordCheatProgress[code] = progress; continue; }
+            _wordCheatProgress[code] = 0;
+            FireWordCheat(target, toast);
+            return true;
+        }
+        return false;
+    }
+
+    protected override void OnKeyPress(KeyPressEventArgs e)
+    {
+        base.OnKeyPress(e);
+        if (_nightPaused || _jumpscareActive) return;
+        if (_tennaQuizActive || _charlieDebateActive) return;
+        if (_waitingForBindingAction is not null) return;
+        if (ProcessWordCheatChar(char.ToUpperInvariant(e.KeyChar))) e.Handled = true;
+    }
+
+    private void FireWordCheat(string target, string toast)
+    {
+        if (target == "reveal") _salvageRevealed = true;
+        else
+        {
+            _unlockedAnimatronicGames.Add(target);
+            foreach (var id in _sheets.Animatronics.Where(a => a.GameId == target).Select(a => a.Id)) _owned.Add(id);
+        }
+        _cheatToastMessage = toast;
+        _cheatToastUntilUtc = DateTime.UtcNow.AddSeconds(3);
+        SaveActiveSlot();
+        Invalidate();
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e); _mouse = ToDesign(e.Location);
@@ -3000,7 +3330,7 @@ internal sealed class GameForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (_tennaQuizActive || _charlieDebateActive) return;
+        if (_tennaQuizActive || _charlieDebateActive || _salvageOfferOpen || _salvageActive || _salvageDone) return;
         var p = ToDesign(e.Location);
         if (e.Button == MouseButtons.Left && HandleResultButton(p))
         {
@@ -3157,7 +3487,9 @@ internal sealed class GameForm : Form
                 foreach (var (tabId, rect) in _officeMonitorTabRects)
                 {
                     if (!rect.Contains(p)) continue;
+                    var wasWatchingCameras = _cameraMonitorMode && tabId != "cameras";
                     _cameraMonitorMode = tabId == "cameras";
+                    if (wasWatchingCameras) MaybeSpawnShadow();
                     NightSounds.Play(tabId == "cameras" ? "camera" : "task");
                     Invalidate();
                     return;
@@ -3185,7 +3517,12 @@ internal sealed class GameForm : Form
         if (_buildTabRect.Contains(p)) { _prepScreen = PrepScreen.Builder; Invalidate(); return; }
         if (_blueprintTabRect.Contains(p)) { _prepScreen = PrepScreen.Blueprint; Invalidate(); return; }
         if (_rosterTabRect.Contains(p)) { _prepScreen = PrepScreen.Roster; Invalidate(); return; }
-        if (_startNightRect.Contains(p)) { StartNight(); return; }
+        if (_startNightRect.Contains(p))
+        {
+            if (ActiveThreatCount() > 0) StartNight();
+            else { _prepScreen = PrepScreen.Roster; _rosterScrollOffset = 0; Invalidate(); }
+            return;
+        }
         if (_prepScreen == PrepScreen.Roster)
         {
             foreach (var (gameId, rect) in _animatronicCategoryUnlockRects)
@@ -3220,6 +3557,11 @@ internal sealed class GameForm : Form
                 SaveActiveSlot();
                 Invalidate(); return;
             }
+            if (_rosterSellRect.Contains(p) && _rosterHoveredAnimatronic is not null)
+            {
+                SellHoveredAnimatronic();
+                return;
+            }
             if (_rosterViewportRect.Contains(p))
             {
                 foreach (var (id, rect) in _rosterCardRects)
@@ -3229,6 +3571,7 @@ internal sealed class GameForm : Form
                     if (!IsAnimatronicSourceAvailable(a)) return;
                     if (!_owned.Contains(id))
                     {
+                        if (a.SalvageOnly) { Invalidate(); return; }
                         if (_funds >= a.Cost)
                         {
                             _pendingPurchaseId = id;
@@ -3259,7 +3602,7 @@ internal sealed class GameForm : Form
                     _pendingPurchaseId = category;
                     _pendingPurchaseKind = PurchaseKind.CatalogCategory;
                 }
-                else _catalogMessage = $"This catalog costs ${CatalogCategoryCost(category):N0}; available cash: ${_funds:N0}.";
+                else _catalogMessage = $"This catalog costs ${CatalogCategoryCost(category):N0}. Available cash: ${_funds:N0}.";
                 Invalidate(); return;
             }
             if (_catalogScrollTrackRect.Contains(p) && _catalogContentHeight > _catalogViewportRect.Height)
@@ -3478,7 +3821,7 @@ internal sealed class GameForm : Form
         foreach (var image in _portraitArt.Values) image.Dispose();
         foreach (var image in _jumpscareArt.Values) { ImageAnimator.StopAnimate(image, OnJumpscareFrameChanged); image.Dispose(); }
         foreach (var image in _catalogAttractionArt.Values) image.Dispose();
-        _tennaModelArt?.Dispose();
+        _tennaModelArt?.Dispose(); _shadowOfficeArt?.Dispose();
         _brandFont.Dispose(); _titleFont.Dispose(); _bodyFont.Dispose(); _smallFont.Dispose(); _cardTitleFont.Dispose(); _panelTitleFont.Dispose(); _messageFont.Dispose(); _aiFont.Dispose(); _noMovementFont.Dispose(); _keyFont.Dispose(); _menuTitleFont.Dispose(); _menuSubtitleFont.Dispose();
         foreach (var source in _sources.Values) source.Dispose();
         base.OnFormClosed(e);

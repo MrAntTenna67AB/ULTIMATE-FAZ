@@ -15,20 +15,24 @@ foreach($g in $games.games) {
   } elseif($g.steamAppId -notmatch '^\d+$') { $errors.Add("games.$($g.id): bad Steam app id") }
 }
 $slotSeen = @{}
+$gameSlots = @{}
+foreach($g in $games.games) { $slots = if ($null -ne $g.rosterSlots) { [int]$g.rosterSlots } else { 12 }; if($slots -lt 12 -or $slots -gt 48 -or ($slots % 12) -ne 0) { $errors.Add("games.$($g.id): rosterSlots must be 12, 24, 36, or 48") }; $gameSlots[$g.id] = $slots }
 foreach($a in $anim.animatronics) {
   foreach($field in @('id','name','gameId','rule','action')) { if([string]::IsNullOrWhiteSpace([string]$a.$field)) { $errors.Add("animatronics.$($a.id): missing $field") } }
   if($a.gameId -notin $gameIds) { $errors.Add("animatronics.$($a.id): unresolved game $($a.gameId)") }
   if($a.cost -lt 0 -or ($a.action -ne 'puppet' -and ($a.firstAttackSeconds -lt 1 -or $a.warningSeconds -lt 1))) { $errors.Add("animatronics.$($a.id): invalid numeric column") }
-  if($a.action -notin @('door','foxy','golden','tenna','mask','lure','listen','scan','mangle','puppet','debate')) { $errors.Add("animatronics.$($a.id): unknown action $($a.action)") }
+  if($a.action -notin @('door','foxy','golden','tenna','mask','lure','listen','scan','mangle','puppet','debate','shadow')) { $errors.Add("animatronics.$($a.id): unknown action $($a.action)") }
   if($a.action -in @('door','listen') -and $a.doorSide -notin @('left','right')) { $errors.Add("animatronics.$($a.id): door threat must name left or right side") }
   foreach($field in @('atmosphere','healthSafety','entertainment','bonusRevenue')) { if($null -eq $a.$field -or ($field -ne 'healthSafety' -and $a.$field -lt 0)) { $errors.Add("animatronics.$($a.id): missing or invalid rating field $field") } }
   if(-not (Test-Path -LiteralPath (Join-Path $root "assets\portraits\$($a.id).png"))) { $errors.Add("animatronics.$($a.id): missing matching portrait asset assets/portraits/$($a.id).png") }
   $slot = if ($null -ne $a.rosterSlot) { [int]$a.rosterSlot } else { -1 }
-  if($slot -lt -1 -or $slot -gt 11) { $errors.Add("animatronics.$($a.id): rosterSlot must be 0-11") }
+  $maxSlot = $gameSlots[$a.gameId] - 1
+  if($slot -lt -1 -or $slot -gt $maxSlot) { $errors.Add("animatronics.$($a.id): rosterSlot must be 0-$maxSlot") }
   if($slot -ge 0) {
     $slotKey = "$($a.gameId)/$slot"
     if($slotSeen.ContainsKey($slotKey)) { $errors.Add("animatronics.$($a.id): rosterSlot $slot already used in $($a.gameId)") } else { $slotSeen[$slotKey] = $true }
   }
+  if($a.id -like 'withered-*' -and -not $a.salvageOnly) { $errors.Add("animatronics.$($a.id): withered animatronics must be salvage-only") }
 }
 foreach($a in $attractions.attractions) {
   foreach($field in @('id','name','category','description','style')) { if([string]::IsNullOrWhiteSpace([string]$a.$field)) { $errors.Add("attractions.$($a.id): missing $field") } }

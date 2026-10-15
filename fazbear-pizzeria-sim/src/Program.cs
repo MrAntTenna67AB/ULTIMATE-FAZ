@@ -37,10 +37,14 @@ internal static class Program
     }
 }
 
-internal sealed record GameSource(string Id, string? Slug, string Name, [property: JsonPropertyName("steamAppId")] string AppId, string Exe, string Role, string Use, int AnimatronicUnlockCost);
+internal sealed record GameSource(string Id, string? Slug, string Name, [property: JsonPropertyName("steamAppId")] string AppId, string Exe, string Role, string Use, int AnimatronicUnlockCost)
+{
+    public int RosterSlots { get; init; } = 12;
+}
 internal sealed record Animatronic(string Id, string Name, string GameId, int Cost, string Rule, string Action, int FirstAttackSeconds, int WarningSeconds, int Pressure, string? DoorSide, int Atmosphere, int HealthSafety, int Entertainment, int BonusRevenue)
 {
     public int RosterSlot { get; init; } = -1;
+    public bool SalvageOnly { get; init; }
 }
 internal sealed record Attraction(string Id, string Name, string Category, int Cost, int Atmosphere, int HealthSafety, int Entertainment, int BonusRevenue, int LiabilityRisk, string Description, string Style);
 internal sealed record SystemRow(string Id, string[] GameRefs, string[] Fields, string Behavior);
