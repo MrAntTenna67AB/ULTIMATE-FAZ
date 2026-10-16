@@ -1,1 +1,4 @@
-this is a merge of fnaf 1,2,3,4,6, and UCN. made with melty game merger app. i dont claim i made anything i just like fnaf a lot
+(OLD) this is a merge of fnaf 1,2,3,4,6, and UCN. made with melty game merger app. i dont claim i made anything i just like fnaf a lot
+-----------------------------------------------------------------------------------------------------------------------------
+yeah nvm im not using melty anymore. will add fnaf 5 and possibly others too, you dont need to have the other games downloaded anymore, its a "fangame" now but im still usin AI for code ONLY! any images are or made by me and my grubby lil hands OR google (or just whats in the games themself like the UCN portraits n all) (or for the case of the pee monster art was made by my friend that wanted it in the game thats why its also just 11$ lmao)
+you might get a antivirus warning but its just a false positive. (probably cuz it was looking if the games were downloaded? idk)
